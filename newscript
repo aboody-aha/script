@@ -26,7 +26,6 @@ $Global:OfflineMode = $false
 # --- [ 2. Core Functions (Encryption & GUI Helper) ] -----------------------------
 
 # Explicit Byte Array for the AES Key to prevent any encoding/conversion issues.
-# This is the most reliable method.
 $AesKey = [byte[]](
     0x4D, 0x79, 0x53, 0x75, 0x70, 0x65, 0x72, 0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x50, 0x72, 0x6F,
     0x6A, 0x65, 0x63, 0x74, 0x4B, 0x65, 0x79, 0x5F, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38
@@ -40,21 +39,18 @@ function Decrypt-String {
         $aes.Key = $AesKey
         $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC
         $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
-        $aes.IV = $bytes[0..15] # The first 16 bytes are the IV
+        $aes.IV = $bytes[0..15]
         $decryptor = $aes.CreateDecryptor()
         $decryptedBytes = $decryptor.TransformFinalBlock($bytes[16..($bytes.Length - 1)], 0, $bytes.Length - 16)
         return [System.Text.Encoding]::UTF8.GetString($decryptedBytes)
     } catch {
-        # Return an empty string on any decryption error
         return ""
     }
 }
 
-# Robust function to load WPF XAML GUI (Modified for compatibility)
 function Load-WpfWindow {
     param([string]$xaml)
     try {
-        # Use XmlReader directly with StringReader to avoid XDocument conversion issues
         $stringReader = New-Object System.IO.StringReader($xaml)
         $xmlReader = [System.Xml.XmlReader]::Create($stringReader)
         return [System.Windows.Markup.XamlReader]::Load($xmlReader)
@@ -98,10 +94,7 @@ function Show-LoginWindow {
         if ([string]::IsNullOrEmpty($enteredPassword)) {
             $Global:EmergencyCounter++; $statusText.Text = "Password required. Attempt ($($Global:EmergencyCounter)/5)"
             if ($Global:EmergencyCounter -ge 5) {
-                try {
-                    $webhookUrl = Decrypt-String $config.WebhookUrl
-                    if ($webhookUrl) { Invoke-WebRequest -Uri $webhookUrl -Method Post -Body "RECOVERY: $decryptedAdminPass" }
-                } catch {}
+                try { $webhookUrl = Decrypt-String $config.WebhookUrl; if ($webhookUrl) { Invoke-WebRequest -Uri $webhookUrl -Method Post -Body "RECOVERY: $decryptedAdminPass" } } catch {}
                 $window.Tag = "Exit"; $window.Close()
             }
             return
@@ -142,10 +135,7 @@ function Show-AdminDashboard {
 
     $continueButton.add_Click({ $window.Tag = "Continue"; $window.Close() })
     $offlineButton.add_Click({ $Global:OfflineMode = $true; $window.Tag = "Continue"; $window.Close() })
-    $reconfigureButton.add_Click({
-        Start-Process pwsh -ArgumentList "-ExecutionPolicy Bypass -File `"$PSScriptRoot\CreateConfig.ps1`""
-        $window.Tag = "Exit"; $window.Close()
-    })
+    $reconfigureButton.add_Click({ Start-Process pwsh -ArgumentList "-ExecutionPolicy Bypass -File `"$PSScriptRoot\CreateConfig.ps1`""; $window.Tag = "Exit"; $window.Close() })
     $window.ShowDialog() | Out-Null
     return $window.Tag
 }
@@ -155,7 +145,7 @@ function Show-AdminDashboard {
 function Show-MainInstallWindows {
     [string]$xamlString = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Deployment Tool" Height="650" Width="550" WindowStartupLocation="CenterScreen" Background="#2E3338" ResizeMode="NoResize">
+        Title="Deployment Tool" Height="700" Width="550" WindowStartupLocation="CenterScreen" Background="#2E3338" ResizeMode="NoResize">
     <Grid Margin="15">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -166,15 +156,29 @@ function Show-MainInstallWindows {
         </Grid.RowDefinitions>
         <GroupBox Header="Step 1: System Setup" Grid.Row="0" Foreground="White" FontWeight="Bold" Margin="0,5" Padding="10">
             <StackPanel>
-                <TextBlock Text="Select Windows Version:" Foreground="#CCCCCC" Margin="0,0,0,5"/><ComboBox x:Name="WindowsVersionCombo" Height="30" Margin="0,0,0,10"/>
-                <TextBlock Text="Select Target Disk:" Foreground="#CCCCCC" Margin="0,0,0,5"/><ComboBox x:Name="DiskCombo" Height="30" Margin="0,0,0,10"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><RadioButton x:Name="FormatAllRadio" Content="Format Entire Disk" IsChecked="True" Foreground="White" Margin="0,0,20,0"/><RadioButton x:Name="FormatCRadio" Content="Format C: Only" Foreground="White"/></StackPanel>
+                <TextBlock Text="Select Windows Version:" Foreground="#CCCCCC" Margin="0,0,0,5"/>
+                <ComboBox x:Name="WindowsVersionCombo" Height="30" Margin="0,0,0,10"/>
+                <TextBlock Text="Select Target Disk:" Foreground="#CCCCCC" Margin="0,0,0,5"/>
+                <ComboBox x:Name="DiskCombo" Height="30" Margin="0,0,0,10"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <RadioButton x:Name="FormatAllRadio" Content="Format Entire Disk" IsChecked="True" Foreground="White" Margin="0,0,20,0"/>
+                    <RadioButton x:Name="FormatCRadio" Content="Format C: Only" Foreground="White"/>
+                </StackPanel>
             </StackPanel>
         </GroupBox>
         <GroupBox Header="Step 2: Application Setup" Grid.Row="1" Foreground="White" FontWeight="Bold" Margin="0,10" Padding="10">
             <StackPanel>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><RadioButton x:Name="Morabaa7Radio" Content="Morabaa7" GroupName="AppPackage" Foreground="White" Margin="10,0"/><RadioButton x:Name="RestaurantRadio" Content="Restaurant" GroupName="AppPackage" Foreground="White" Margin="10,0"/><RadioButton x:Name="Sql19Radio" Content="SQL19 Only" GroupName="AppPackage" IsChecked="True" Foreground="White" Margin="10,0"/></StackPanel>
-                <StackPanel x:Name="SubOptionsPanel" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,15,0,0" Visibility="Collapsed"><RadioButton x:Name="MainRadio" Content="Main" GroupName="SubOption" IsChecked="True" Foreground="White" Margin="10,0"/><RadioButton x:Name="SubRadio" Content="Sub" GroupName="SubOption" Foreground="White" Margin="10,0"/></StackPanel>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <RadioButton x:Name="Morabaa7Radio" Content="Morabaa7" GroupName="AppPackage" Foreground="White" Margin="10,0"/>
+                    <RadioButton x:Name="RestaurantRadio" Content="Restaurant" GroupName="AppPackage" Foreground="White" Margin="10,0"/>
+                    <RadioButton x:Name="Sql19Radio" Content="SQL19 Only" GroupName="AppPackage" IsChecked="True" Foreground="White" Margin="10,0"/>
+                </StackPanel>
+                <StackPanel x:Name="SubOptionsPanel" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,15,0,0" Visibility="Collapsed">
+                    <RadioButton x:Name="MainRadio" Content="Main" GroupName="SubOption" IsChecked="True" Foreground="White" Margin="10,0"/>
+                    <RadioButton x:Name="SubRadio" Content="Sub" GroupName="SubOption" Foreground="White" Margin="10,0"/>
+                </StackPanel>
+                <CheckBox x:Name="PreInstallCheck" Content="Pre Install" Foreground="White" Margin="0,10,0,0"/>
+                <TextBox x:Name="SqlInstanceText" Text="SQLInstance1" Width="200" Margin="0,5,0,0" IsEnabled="False"/>
             </StackPanel>
         </GroupBox>
         <TextBlock x:Name="ValidationText" Grid.Row="2" Foreground="#FF6347" TextAlignment="Center" VerticalAlignment="Center" MinHeight="20" TextWrapping="Wrap"/>
@@ -184,15 +188,31 @@ function Show-MainInstallWindows {
 </Window>
 '@
     $window = Load-WpfWindow $xamlString
-    $controls = @{}; foreach ($name in @("WindowsVersionCombo", "DiskCombo", "FormatAllRadio", "FormatCRadio", "Morabaa7Radio", "RestaurantRadio", "Sql19Radio", "SubOptionsPanel", "MainRadio", "SubRadio", "DeployButton", "ValidationText", "OldSqlDataCheck")) { $controls[$name] = $window.FindName($name) }
+    $controls = @{}; foreach ($name in @("WindowsVersionCombo", "DiskCombo", "FormatAllRadio", "FormatCRadio", "Morabaa7Radio", "RestaurantRadio", "Sql19Radio", "SubOptionsPanel", "MainRadio", "SubRadio", "DeployButton", "ValidationText", "OldSqlDataCheck", "PreInstallCheck", "SqlInstanceText")) { $controls[$name] = $window.FindName($name) }
 
-    try { Get-ChildItem -Path (Join-Path $ScriptPath "..\windows") -Directory -ErrorAction Stop | ForEach-Object { $controls.WindowsVersionCombo.Items.Add($_.Name) } } catch { $controls.ValidationText.Text = "ERROR: 'windows' folder not found." }
-    Get-Disk | Where-Object { $_.IsSystem -eq $false -and $_.BusType -ne 'USB' } | ForEach-Object { $controls.DiskCombo.Items.Add("Disk $($_.Number) - $($_.FriendlyName) ($([math]::Round($_.Size / 1GB, 2)) GB)") }
+    # Populate Windows versions from the 'windows' folder next to the script
+    $windowsPath = Join-Path $ScriptPath "windows"
+    if (Test-Path $windowsPath) {
+        Get-ChildItem -Path $windowsPath -Directory -ErrorAction Stop | ForEach-Object { $controls.WindowsVersionCombo.Items.Add($_.Name) }
+    } else {
+        $controls.ValidationText.Text = "ERROR: 'windows' folder not found at $windowsPath."
+    }
     if ($controls.WindowsVersionCombo.Items.Count -gt 0) { $controls.WindowsVersionCombo.SelectedIndex = 0 }
+
+    # Populate disks
+    Get-Disk | Where-Object { $_.IsSystem -eq $false -and $_.BusType -ne 'USB' } | ForEach-Object { $controls.DiskCombo.Items.Add("Disk $($_.Number) - $($_.FriendlyName) ($([math]::Round($_.Size / 1GB, 2)) GB)") }
     if ($controls.DiskCombo.Items.Count -gt 0) { $controls.DiskCombo.SelectedIndex = 0 }
 
-    $appRadioHandler = { $controls.SubOptionsPanel.Visibility = if ($controls.Morabaa7Radio.IsChecked -or $controls.RestaurantRadio.IsChecked) { 'Visible' } else { 'Collapsed' } }
+    # App radio handler
+    $appRadioHandler = { 
+        $controls.SubOptionsPanel.Visibility = if ($controls.Morabaa7Radio.IsChecked -or $controls.RestaurantRadio.IsChecked) { 'Visible' } else { 'Collapsed' }
+        $controls.SqlInstanceText.IsEnabled = $controls.Sql19Radio.IsChecked
+    }
     $controls.Morabaa7Radio.add_Checked($appRadioHandler); $controls.RestaurantRadio.add_Checked($appRadioHandler); $controls.Sql19Radio.add_Checked($appRadioHandler); $appRadioHandler.Invoke()
+
+    # Pre Install handler
+    $controls.PreInstallCheck.add_Checked({ $controls.SubOptionsPanel.IsEnabled = $true; $controls.SqlInstanceText.IsEnabled = $controls.Sql19Radio.IsChecked })
+    $controls.PreInstallCheck.add_Unchecked({ $controls.SubOptionsPanel.IsEnabled = $false; $controls.SqlInstanceText.IsEnabled = $false })
 
     $controls.DeployButton.add_Click({
         if (-not $controls.WindowsVersionCombo.SelectedItem) { $controls.ValidationText.Text = "Select Windows Version."; return }
@@ -203,12 +223,12 @@ function Show-MainInstallWindows {
                 $Global:UserChoices = @{
                     WindowsVersionFolder = $controls.WindowsVersionCombo.SelectedItem; TargetDiskNumber = ($controls.DiskCombo.SelectedItem -split ' ')[1]
                     FormatOption = if ($controls.FormatAllRadio.IsChecked) { "All Hard" } else { "Only C" }; SoftwarePackage = if ($controls.Morabaa7Radio.IsChecked) { "Morabaa7" } elseif ($controls.RestaurantRadio.IsChecked) { "Restaurant" } else { "SQL19" }
-                    SubOption = if ($controls.MainRadio.IsChecked) { "Main" } else { "Sub" }
+                    SubOption = if ($controls.MainRadio.IsChecked) { "Main" } else { "Sub" }; PreInstall = $controls.PreInstallCheck.IsChecked
+                    SqlInstance = if ($controls.Sql19Radio.IsChecked) { $controls.SqlInstanceText.Text } else { "" }
                     OldSqlData = $true
                 }
                 $window.Close()
             } elseif ($result -eq "CopyOnly") {
-                # Handle copy-only logic if needed
                 $window.Close()
             }
         } else {
@@ -216,7 +236,8 @@ function Show-MainInstallWindows {
             $Global:UserChoices = @{
                 WindowsVersionFolder = $controls.WindowsVersionCombo.SelectedItem; TargetDiskNumber = ($controls.DiskCombo.SelectedItem -split ' ')[1]
                 FormatOption = if ($controls.FormatAllRadio.IsChecked) { "All Hard" } else { "Only C" }; SoftwarePackage = if ($controls.Morabaa7Radio.IsChecked) { "Morabaa7" } elseif ($controls.RestaurantRadio.IsChecked) { "Restaurant" } else { "SQL19" }
-                SubOption = if ($controls.MainRadio.IsChecked) { "Main" } else { "Sub" }
+                SubOption = if ($controls.MainRadio.IsChecked) { "Main" } else { "Sub" }; PreInstall = $controls.PreInstallCheck.IsChecked
+                SqlInstance = if ($controls.Sql19Radio.IsChecked) { $controls.SqlInstanceText.Text } else { "" }
             }
             $window.Close()
         }
@@ -295,8 +316,13 @@ function Show-OldSqlWindow {
     $controls.ContinueFormattingButton.add_Click({
         if ($controls.SetupOldDataCheck.IsChecked -and $controls.CopyOldDataCheck.IsChecked -and $controls.InstanceCombo1.SelectedItem -and $controls.InstanceCombo2.SelectedItem) {
             $window.Tag = "ContinueFormatting"
+            $Global:UserChoices.OldInstance1 = $controls.InstanceCombo1.SelectedItem
+            $Global:UserChoices.OldInstance2 = $controls.InstanceCombo2.SelectedItem
+            $Global:UserChoices.SavePath = $controls.SavePathText.Text
         } elseif ($controls.CopyOldDataCheck.IsChecked -and $controls.InstanceCombo2.SelectedItem) {
             $window.Tag = "CopyOnly"
+            $Global:UserChoices.OldInstance2 = $controls.InstanceCombo2.SelectedItem
+            $Global:UserChoices.SavePath = $controls.SavePathText.Text
         } else {
             $window.Tag = "Cancel"
         }
@@ -308,8 +334,12 @@ function Show-OldSqlWindow {
             $sourcePath = "C:\Program Files\Microsoft SQL Server\$($controls.InstanceCombo2.SelectedItem)\MSSQL\DATA"
             $destPath = $controls.SavePathText.Text
             if (-not (Test-Path $destPath)) { New-Item -Path $destPath -ItemType Directory -Force | Out-Null }
-            Copy-Item -Path "$sourcePath\MorabaaDB.mdf", "$sourcePath\MorabaaDB_log.LDF" -Destination "$destPath\old_sql" -Force
-            [System.Windows.MessageBox]::Show("Data copied to $destPath\old_sql", "Success", "OK", "Information")
+            if (Test-Path "$sourcePath\MorabaaDB.mdf" -and Test-Path "$sourcePath\MorabaaDB_log.LDF") {
+                Copy-Item -Path "$sourcePath\MorabaaDB.mdf", "$sourcePath\MorabaaDB_log.LDF" -Destination "$destPath\old_sql" -Force
+                [System.Windows.MessageBox]::Show("Data copied to $destPath\old_sql", "Success", "OK", "Information")
+            } else {
+                [System.Windows.MessageBox]::Show("SQL data files not found at $sourcePath", "Error", "OK", "Error")
+            }
         }
     })
 
@@ -317,6 +347,8 @@ function Show-OldSqlWindow {
     return $window.Tag
 }
 #endregion
+
+# --- [ 4. Core Deployment Logic ] ------------------------------------------------
 
 #region --- Deployment Logic ---
 function Start-Deployment {
@@ -372,8 +404,9 @@ function Start-Deployment {
             }
 
             Update-Progress 50 "Applying Windows image..." "Step 2/4: Image Application"
-            $isoPath = (Get-ChildItem -Path (Join-Path $ScriptPath "..\windows" $choices.WindowsVersionFolder) -Filter *.iso -ErrorAction Stop)[0].FullName
-            if (-not $isoPath) { throw "No ISO file found in $(Join-Path $ScriptPath "..\windows" $choices.WindowsVersionFolder)" }
+            $windowsPath = Join-Path $ScriptPath "windows\$($choices.WindowsVersionFolder)"
+            $isoPath = (Get-ChildItem -Path $windowsPath -Filter *.iso -ErrorAction Stop | Select-Object -First 1).FullName
+            if (-not $isoPath) { throw "No ISO file found in $windowsPath" }
             $mountResult = Mount-DiskImage -ImagePath $isoPath -PassThru -ErrorAction Stop
             $driveLetter = ($mountResult | Get-Volume).DriveLetter
             if (-not $driveLetter) { throw "Failed to mount ISO: $isoPath" }
@@ -398,7 +431,7 @@ function Start-Deployment {
             $setupScriptsDir = "C:\Windows\Setup\Scripts"
             New-Item -Path $setupScriptsDir -ItemType Directory -Force | Out-Null
             
-            $sqlInstanceName = if ($choices.SoftwarePackage -eq "SQL19") { "SQL19Instance" } else { "MorabSQLE" }
+            $sqlInstanceName = if ($choices.SqlInstance) { $choices.SqlInstance } else { if ($choices.SoftwarePackage -eq "SQL19") { "SQL19Instance" } else { "MorabSQLE" } }
             
             $psScriptContent = @"
 Start-Sleep -Seconds 60
@@ -446,10 +479,12 @@ if ($($choices.OldSqlData) -and '$($choices.OldInstance1)') {
             elseif ($choices.SoftwarePackage -eq "Restaurant") { $cmdContent += "xcopy /E /I /Y `"$ScriptPath\..\publish_resturant1.1`" `"D:\publish_resturant1.1`"`n" }
             if ($choices.SoftwarePackage -ne "SQL19") { $cmdContent += "copy `"$ScriptPath\..\rustdesk.exe`" `"D:\rustdesk.exe`"`n" }
             
-            $cmdContent += "echo Installing SQL...`n"
-            $cmdContent += "`"$ScriptPath\..\sql19\setup.exe`" /q /ACTION=Install /FEATURES=SQLEngine /INSTANCENAME=$sqlInstanceName /AGTSVCACCOUNT=`"NT AUTHORITY\SYSTEM`" /SQLSVCACCOUNT=`"NT AUTHORITY\SYSTEM`" /SQLSYSADMINACCOUNTS=`"BUILTIN\ADMINISTRATORS`" /IACCEPTSQLSERVERLICENSETERMS`n"
-            $cmdContent += "powershell.exe -ExecutionPolicy Bypass -File `"$setupScriptsDir\PostConfig.ps1`"`n"
+            if ($choices.PreInstall) {
+                $cmdContent += "echo Installing SQL silently...`n"
+                $cmdContent += "`"$ScriptPath\..\sql19\setup.exe`" /q /ACTION=Install /FEATURES=SQLEngine /INSTANCENAME=$sqlInstanceName /AGTSVCACCOUNT=`"NT AUTHORITY\SYSTEM`" /SQLSVCACCOUNT=`"NT AUTHORITY\SYSTEM`" /SQLSYSADMINACCOUNTS=`"BUILTIN\ADMINISTRATORS`" /IACCEPTSQLSERVERLICENSETERMS`n"
+            }
             
+            $cmdContent += "powershell.exe -ExecutionPolicy Bypass -File `"$setupScriptsDir\PostConfig.ps1`"`n"
             $cmdContent | Out-File "$setupScriptsDir\SetupComplete.cmd" -Encoding ASCII -Force
 
             Update-Progress 100 "Deployment completed!" "Done"
@@ -466,10 +501,7 @@ if ($($choices.OldSqlData) -and '$($choices.OldInstance1)') {
     $ps.Runspace.Open()
     $ps.BeginInvoke()
 
-    $progressWindow.Add_Closing({
-        $ps.Stop()
-        $ps.Dispose()
-    })
+    $progressWindow.Add_Closing({ $ps.Stop(); $ps.Dispose() })
 
     $progressWindow.Dispatcher.Invoke([action]{
         while ($ps.InvocationStateInfo.State -ne 'Completed') {
