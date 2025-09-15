@@ -1,1 +1,91 @@
-1
+MissingCatchOrFinally               ParseError   Installer. 523   The Try statement is missing its Catch or Finally
+                                                 ps1              block.
+MissingEndCurlyBrace                ParseError   Installer. 354   Missing closing '}' in statement block or type
+                                                 ps1              definition.
+PSAvoidGlobalVars                   Warning      Installer. 17    Found global variable 'Global:EmergencyCounter'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 18    Found global variable 'Global:UserChoices'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 19    Found global variable 'Global:OfflineMode'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 88    Found global variable 'Global:EmergencyCounter'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 88    Found global variable 'Global:EmergencyCounter'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 89    Found global variable 'Global:EmergencyCounter'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 97    Found global variable 'Global:OfflineMode'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 129   Found global variable 'Global:OfflineMode'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 211   Found global variable 'Global:UserChoices'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 224   Found global variable 'Global:UserChoices'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 235   Found global variable 'Global:UserChoices'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 306   Found global variable 'Global:UserChoices'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 307   Found global variable 'Global:UserChoices'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 308   Found global variable 'Global:UserChoices'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 311   Found global variable 'Global:UserChoices'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 312   Found global variable 'Global:UserChoices'.
+                                                 ps1
+PSAvoidGlobalVars                   Warning      Installer. 523   Found global variable 'Global:UserChoices'.
+                                                 ps1
+PSAvoidUsingEmptyCatchBlock         Warning      Installer. 90    Empty catch block is used. Please use Write-Error or
+                                                 ps1              throw statements in catch blocks.
+PSAvoidTrailingWhitespace           Information  Installer. 196   Line has trailing whitespace
+                                                 ps1
+PSAvoidTrailingWhitespace           Information  Installer. 356   Line has trailing whitespace
+                                                 ps1
+PSAvoidTrailingWhitespace           Information  Installer. 358   Line has trailing whitespace
+                                                 ps1
+PSAvoidTrailingWhitespace           Information  Installer. 361   Line has trailing whitespace
+                                                 ps1
+PSAvoidTrailingWhitespace           Information  Installer. 363   Line has trailing whitespace
+                                                 ps1
+PSAvoidTrailingWhitespace           Information  Installer. 377   Line has trailing whitespace
+                                                 ps1
+PSAvoidTrailingWhitespace           Information  Installer. 458   Line has trailing whitespace
+                                                 ps1
+PSAvoidTrailingWhitespace           Information  Installer. 460   Line has trailing whitespace
+                                                 ps1
+PSAvoidTrailingWhitespace           Information  Installer. 506   Line has trailing whitespace
+                                                 ps1
+PSAvoidTrailingWhitespace           Information  Installer. 511   Line has trailing whitespace
+                                                 ps1
+PSUseApprovedVerbs                  Warning      Installer. 28    The cmdlet 'Decrypt-String' uses an unapproved verb.
+                                                 ps1
+PSUseApprovedVerbs                  Warning      Installer. 45    The cmdlet 'Load-WpfWindow' uses an unapproved verb.
+                                                 ps1
+PSAvoidUsingComputerNameHardcoded   Error        Installer. 98    The ComputerName parameter of cmdlet
+                                                 ps1              'Test-Connection' is hardcoded. This will expose
+                                                                  sensitive information about the system if the script
+                                                                  is shared.
+PSAvoidUsingWriteHost               Warning      Installer. 560   File 'Installer.ps1' uses Write-Host. Avoid using
+                                                 ps1              Write-Host because it might not work in all hosts,
+                                                                  does not work when there is no host, and (prior to
+                                                                  PS 5.0) cannot be suppressed, captured, or
+                                                                  redirected. Instead, use Write-Output,
+                                                                  Write-Verbose, or Write-Information.
+PSReviewUnusedParameter             Warning      Installer. 355   The parameter 'syncHash' has been declared but not
+                                                 ps1              used.
+PSUseShouldProcessForStateChangingF Warning      Installer. 340   Function 'Start-Deployment' has verb that could
+unctions                                         ps1              change system state. Therefore, the function has to
+                                                                  support 'ShouldProcess'.
+PSUseShouldProcessForStateChangingF Warning      Installer. 357   Function 'Update-Progress' has verb that could
+unctions                                         ps1              change system state. Therefore, the function has to
+                                                                  support 'ShouldProcess'.
+PSAvoidUsingPositionalParameters    Information  Installer. 362   Cmdlet 'Update-Progress' has positional parameter.
+                                                 ps1              Please use named parameters instead of positional
+                                                                  parameters when calling a command.
+PSAvoidUsingPositionalParameters    Information  Installer. 515   Cmdlet 'Update-Progress' has positional parameter.
+                                                 ps1              Please use named parameters instead of positional
+                                                                  parameters when calling a command.
+PSAvoidUsingPositionalParameters    Information  Installer. 518   Cmdlet 'Update-Progress' has positional parameter.
+                                                 ps1              Please use named parameters instead of positional
+                                                                  parameters when calling a command.
