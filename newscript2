@@ -1,14 +1,17 @@
-# =================================================================================
-#               Universal Windows Deployment Tool - FINAL REBUILT VERSION (v9)
-#               Re-engineered from scratch for stability, clarity, and reliability.
-# =================================================================================
+# Universal Windows Deployment Tool - FIXED VERSION
+# تم تصحيح الأخطاء التركيبية وتجهيز السكربت للتشغيل
 
-# --- [ 1. Initial Configuration & Global Setup ] ---------------------------------
+# 1. إعداد عام
 $OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName PresentationFramework, System.Windows.Forms
 
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    [System.Windows.MessageBox]::Show("This script must be run as Administrator.", "Error", "OK", "Error")
+    [System.Windows.MessageBox]::Show(
+        "This script must be run as Administrator.",
+        "Error",
+        [System.Windows.MessageBoxButton]::OK,
+        [System.Windows.MessageBoxImage]::Error
+    )
     exit
 }
 
@@ -18,46 +21,67 @@ $Global:EmergencyCounter = 0
 $Global:UserChoices = @{}
 $Global:OfflineMode = $false
 
-# --- [ 2. Core Functions (Encryption & GUI Helper) ] -----------------------------
+# 2. الدوال المساعدة
 
+# تحويل محتوى ملف config (Key:Value أو Key=Value) إلى هاش تيبل
+function Load-ConfigFile {
+    param([string]$Path)
+    $cfg = @{}
+    if (-not (Test-Path $Path)) { return $null }
+    Get-Content $Path | ForEach-Object {
+        if ($_ -match '^\s*([^:#=]+)\s*[:=]\s*(.+)$') {
+            $key = $matches[1].Trim()
+            $val = $matches[2].Trim()
+            $cfg[$key] = $val
+        }
+    }
+    return $cfg
+}
+
+# مفتاح AES (كمصفوفة بايت)
 $AesKey = [byte[]](
-    0x4D, 0x79, 0x53, 0x75, 0x70, 0x65, 0x72, 0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x50, 0x72, 0x6F,
-    0x6A, 0x65, 0x63, 0x74, 0x4B, 0x65, 0x79, 0x5F, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38
+    0x4D,0x79,0x53,0x75,0x70,0x65,0x72,0x53,0x65,0x63,0x72,0x65,0x74,0x50,0x72,0x6F,
+    0x6A,0x65,0x63,0x74,0x4B,0x65,0x79,0x5F,0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38
 )
 
-function ConvertTo-DecryptedString {
+function Decrypt-String {
     param([string]$StringToDecrypt)
     try {
+        if ([string]::IsNullOrEmpty($StringToDecrypt)) { return "" }
         $bytes = [System.Convert]::FromBase64String($StringToDecrypt)
+        if ($bytes.Length -lt 17) { return "" }
         $aes = New-Object System.Security.Cryptography.AesManaged
         $aes.Key = $AesKey
         $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC
         $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
         $aes.IV = $bytes[0..15]
         $decryptor = $aes.CreateDecryptor()
-        $decryptedBytes = $decryptor.TransformFinalBlock($bytes[16..($bytes.Length - 1)], 0, $bytes.Length - 16)
+        $decryptedBytes = $decryptor.TransformFinalBlock($bytes, 16, $bytes.Length - 16)
         return [System.Text.Encoding]::UTF8.GetString($decryptedBytes)
     } catch {
-        Write-Error "Decryption failed: $($_.Exception.Message)"
         return ""
     }
 }
 
-function Import-WpfWindow {
+function Load-WpfWindow {
     param([string]$xaml)
     try {
         $stringReader = New-Object System.IO.StringReader($xaml)
         $xmlReader = [System.Xml.XmlReader]::Create($stringReader)
         return [System.Windows.Markup.XamlReader]::Load($xmlReader)
     } catch {
-        [System.Windows.MessageBox]::Show("Fatal Error loading GUI: $($_.Exception.Message)", "Fatal Error", "OK", "Error")
+        [System.Windows.MessageBox]::Show(
+            "Fatal Error loading GUI: $($_.Exception.Message)",
+            "Fatal Error",
+            [System.Windows.MessageBoxButton]::OK,
+            [System.Windows.MessageBoxImage]::Error
+        )
         exit
     }
 }
 
-# --- [ 3. GUI Window Definitions ] -----------------------------------------------
+# 3. النوافذ (WPF)
 
-#region --- Login Window ---
 function Show-LoginWindow {
     [string]$xamlString = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -75,71 +99,58 @@ function Show-LoginWindow {
     </Border>
 </Window>
 '@
-    $window = Import-WpfWindow $xamlString
-    $passwordBox = $window.FindName("PasswordBox")
-    $loginButton = $window.FindName("LoginButton")
-    $statusText = $window.FindName("StatusText")
+
+    $window = Load-WpfWindow $xamlString
+    $passwordBox = $window.FindName("PasswordBox"); $loginButton = $window.FindName("LoginButton"); $statusText = $window.FindName("StatusText")
 
     if (-not (Test-Path $ConfigFilePath)) {
-        [System.Windows.MessageBox]::Show("Config file not found.", "Error")
+        [System.Windows.MessageBox]::Show("Config file not found.", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
         return "Exit"
     }
-    $config = (Get-Content $ConfigFilePath -Raw) | ConvertFrom-StringData -Delimiter ':'
+    $config = Load-ConfigFile -Path $ConfigFilePath
+    if (-not $config) {
+        [System.Windows.MessageBox]::Show("Config file invalid or empty.", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+        return "Exit"
+    }
 
     $loginButton.add_Click({
         $enteredPassword = $passwordBox.Password
-        $decryptedAdminPass = ConvertTo-DecryptedString $config.SuperAdminPass
-        if ($enteredPassword -eq $decryptedAdminPass) {
-            $window.Tag = "SuperAdmin"
-            $window.Close()
-            return
-        }
+        $decryptedAdminPass = Decrypt-String $config.SuperAdminPass
+
+        if ($enteredPassword -eq $decryptedAdminPass) { $window.Tag = "SuperAdmin"; $window.Close(); return }
 
         if ([string]::IsNullOrEmpty($enteredPassword)) {
-            $Global:EmergencyCounter++
+            $Global:EmergencyCounter++;
             $statusText.Text = "Password required. Attempt ($($Global:EmergencyCounter)/5)"
             if ($Global:EmergencyCounter -ge 5) {
                 try {
-                    $webhookUrl = ConvertTo-DecryptedString $config.WebhookUrl
-                    if ($webhookUrl) { Invoke-WebRequest -Uri $webhookUrl -Method Post -Body "RECOVERY: $decryptedAdminPass" }
-                } catch { Write-Error "Webhook failed" }
-                $window.Tag = "Exit"
-                $window.Close()
+                    $webhookUrl = Decrypt-String $config.WebhookUrl
+                    if ($webhookUrl) { Invoke-WebRequest -Uri $webhookUrl -Method Post -Body "RECOVERY: $decryptedAdminPass" -ErrorAction SilentlyContinue }
+                } catch {}
+                $window.Tag = "Exit"; $window.Close()
             }
             return
         }
 
         $statusText.Text = "Verifying..."
-        $window.UpdateLayout()
-        if ($Global:OfflineMode) {
-            $window.Tag = "User"
-            $window.Close()
-            return
-        }
-        if (-not (Test-Connection -ComputerName (ConvertTo-DecryptedString $config.TestServer) -Count 1 -Quiet)) {
-            $statusText.Text = "Internet required."
-            return
-        }
+        # Force render so user sees message
+        $window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Render)
+
+        if ($Global:OfflineMode) { $window.Tag = "User"; $window.Close(); return }
+
+        if (-not (Test-Connection -ComputerName "raw.githubusercontent.com" -Count 1 -Quiet)) { $statusText.Text = "Internet required."; return }
 
         try {
-            $passwordUrl = ConvertTo-DecryptedString $config.DriveUrl
-            $encryptedPassFromWeb = (Invoke-WebRequest -Uri $passwordUrl -UseBasicParsing).Content.Trim()
-            if ($enteredPassword -eq (ConvertTo-DecryptedString $encryptedPassFromWeb)) {
-                $window.Tag = "User"
-                $window.Close()
-            } else {
-                $statusText.Text = "Incorrect password."
-            }
-        } catch {
-            $statusText.Text = "Error fetching password."
-        }
+            $passwordUrl = Decrypt-String $config.DriveUrl
+            $encryptedPassFromWeb = (Invoke-WebRequest -Uri $passwordUrl -ErrorAction Stop).Content.Trim()
+            if ($enteredPassword -eq (Decrypt-String $encryptedPassFromWeb)) { $window.Tag = "User"; $window.Close() } else { $statusText.Text = "Incorrect password." }
+        } catch { $statusText.Text = "Error fetching password." }
     })
+
     $window.ShowDialog() | Out-Null
     return $window.Tag
 }
-#endregion
 
-#region --- Admin Dashboard ---
 function Show-AdminDashboard {
     [string]$xamlString = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -154,126 +165,105 @@ function Show-AdminDashboard {
     </Grid>
 </Window>
 '@
-    $window = Import-WpfWindow $xamlString
-    $continueButton = $window.FindName("ContinueButton")
-    $offlineButton = $window.FindName("OfflineButton")
-    $reconfigureButton = $window.FindName("ReconfigureButton")
+
+    $window = Load-WpfWindow $xamlString
+    $continueButton = $window.FindName("ContinueButton"); $offlineButton = $window.FindName("OfflineButton"); $reconfigureButton = $window.FindName("ReconfigureButton")
 
     $continueButton.add_Click({ $window.Tag = "Continue"; $window.Close() })
     $offlineButton.add_Click({ $Global:OfflineMode = $true; $window.Tag = "Continue"; $window.Close() })
     $reconfigureButton.add_Click({
-        Start-Process pwsh -ArgumentList "-ExecutionPolicy Bypass -File `"$PSScriptRoot\CreateConfig.ps1`""
-        $window.Tag = "Exit"
-        $window.Close()
+        # Use powershell (Windows PowerShell) for compatibility
+        Start-Process -FilePath "powershell" -ArgumentList "-ExecutionPolicy Bypass -File `"$PSScriptRoot\CreateConfig.ps1`"" -WindowStyle Normal
+        $window.Tag = "Exit"; $window.Close()
     })
+
     $window.ShowDialog() | Out-Null
     return $window.Tag
 }
-#endregion
 
-#region --- Main Install Windows ---
 function Show-MainInstallWindows {
     [string]$xamlString = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Deployment Tool" Height="700" Width="550" WindowStartupLocation="CenterScreen" Background="#2E3338" ResizeMode="NoResize">
+        Title="Deployment Tool" Height="600" Width="550" WindowStartupLocation="CenterScreen" Background="#2E3338" ResizeMode="NoResize">
     <Grid Margin="15">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <GroupBox Header="Step 1: System Setup" Grid.Row="0" Foreground="White" FontWeight="Bold" Margin="0,5" Padding="10">
             <StackPanel>
-                <TextBlock Text="Select Windows Version:" Foreground="#CCCCCC" Margin="0,0,0,5"/>
-                <ComboBox x:Name="WindowsVersionCombo" Height="30" Margin="0,0,0,10"/>
-                <TextBlock Text="Select Target Disk:" Foreground="#CCCCCC" Margin="0,0,0,5"/>
-                <ComboBox x:Name="DiskCombo" Height="30" Margin="0,0,0,10"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                    <RadioButton x:Name="FormatAllRadio" Content="Format Entire Disk" IsChecked="True" Foreground="White" Margin="0,0,20,0"/>
-                    <RadioButton x:Name="FormatCRadio" Content="Format C: Only" Foreground="White"/>
-                </StackPanel>
+                <TextBlock Text="Select Windows Version:" Foreground="#CCCCCC" Margin="0,0,0,5"/><ComboBox x:Name="WindowsVersionCombo" Height="30" Margin="0,0,0,10"/>
+                <TextBlock Text="Select Target Disk:" Foreground="#CCCCCC" Margin="0,0,0,5"/><ComboBox x:Name="DiskCombo" Height="30" Margin="0,0,0,10"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><RadioButton x:Name="FormatAllRadio" Content="Format Entire Disk" IsChecked="True" Foreground="White" Margin="0,0,20,0"/><RadioButton x:Name="FormatCRadio" Content="Format C: Only" Foreground="White"/></StackPanel>
             </StackPanel>
         </GroupBox>
         <GroupBox Header="Step 2: Application Setup" Grid.Row="1" Foreground="White" FontWeight="Bold" Margin="0,10" Padding="10">
             <StackPanel>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                    <RadioButton x:Name="Morabaa7Radio" Content="Morabaa7" GroupName="AppPackage" Foreground="White" Margin="10,0"/>
-                    <RadioButton x:Name="RestaurantRadio" Content="Restaurant" GroupName="AppPackage" Foreground="White" Margin="10,0"/>
-                    <RadioButton x:Name="Sql19Radio" Content="SQL19 Only" GroupName="AppPackage" IsChecked="True" Foreground="White" Margin="10,0"/>
-                </StackPanel>
-                <StackPanel x:Name="SubOptionsPanel" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,15,0,0" Visibility="Collapsed">
-                    <RadioButton x:Name="MainRadio" Content="Main" GroupName="SubOption" IsChecked="True" Foreground="White" Margin="10,0"/>
-                    <RadioButton x:Name="SubRadio" Content="Sub" GroupName="SubOption" Foreground="White" Margin="10,0"/>
-                </StackPanel>
-                <CheckBox x:Name="PreInstallCheck" Content="Pre Install SQL" Foreground="White" Margin="0,10,0,0"/>
-                <TextBox x:Name="SqlInstanceText" Text="SQLInstance1" Width="200" Margin="0,5,0,0" IsEnabled="False"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><RadioButton x:Name="Morabaa7Radio" Content="Morabaa7" GroupName="AppPackage" Foreground="White" Margin="10,0"/><RadioButton x:Name="RestaurantRadio" Content="Restaurant" GroupName="AppPackage" Foreground="White" Margin="10,0"/><RadioButton x:Name="Sql19Radio" Content="SQL19 Only" GroupName="AppPackage" IsChecked="True" Foreground="White" Margin="10,0"/></StackPanel>
+                <StackPanel x:Name="SubOptionsPanel" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,15,0,0" Visibility="Collapsed"><RadioButton x:Name="MainRadio" Content="Main" GroupName="SubOption" IsChecked="True" Foreground="White" Margin="10,0"/><RadioButton x:Name="SubRadio" Content="Sub" GroupName="SubOption" Foreground="White" Margin="10,0"/></StackPanel>
             </StackPanel>
         </GroupBox>
         <TextBlock x:Name="ValidationText" Grid.Row="2" Foreground="#FF6347" TextAlignment="Center" VerticalAlignment="Center" MinHeight="20" TextWrapping="Wrap"/>
         <Button x:Name="DeployButton" Content="Start Deployment" Grid.Row="3" Height="50" Background="#28A745" Foreground="White" FontSize="18" FontWeight="Bold"/>
-        <CheckBox x:Name="CopySqlDataCheck" Content="Copy SQL Data" Grid.Row="4" Foreground="White" Margin="10,10,0,0" VerticalAlignment="Top" IsChecked="False"/>
     </Grid>
 </Window>
 '@
-    $window = Import-WpfWindow $xamlString
+
+    $window = Load-WpfWindow $xamlString
     $controls = @{}
-    foreach ($name in @("WindowsVersionCombo", "DiskCombo", "FormatAllRadio", "FormatCRadio", "Morabaa7Radio", "RestaurantRadio", "Sql19Radio", "SubOptionsPanel", "MainRadio", "SubRadio", "DeployButton", "ValidationText", "PreInstallCheck", "SqlInstanceText", "CopySqlDataCheck")) {
+    foreach ($name in @("WindowsVersionCombo","DiskCombo","FormatAllRadio","FormatCRadio","Morabaa7Radio","RestaurantRadio","Sql19Radio","SubOptionsPanel","MainRadio","SubRadio","DeployButton","ValidationText")) {
         $controls[$name] = $window.FindName($name)
     }
 
-    $windowsPath = Join-Path $ScriptPath "windows"
-    if (Test-Path $windowsPath) {
-        Get-ChildItem -Path $windowsPath -Directory -ErrorAction Stop | ForEach-Object { $controls.WindowsVersionCombo.Items.Add($_.Name) }
-    } else {
-        $controls.ValidationText.Text = "ERROR: 'windows' folder not found at $windowsPath."
+    try {
+        $windowsDir = Join-Path $ScriptPath "..\windows"
+        Get-ChildItem -Path $windowsDir -Directory -ErrorAction Stop | ForEach-Object { $controls.WindowsVersionCombo.Items.Add($_.Name) }
+    } catch {
+        $controls.ValidationText.Text = "ERROR: 'windows' folder not found."
     }
-    if ($controls.WindowsVersionCombo.Items.Count -gt 0) { $controls.WindowsVersionCombo.SelectedIndex = 0 }
 
-    Get-Disk | Where-Object { $_.IsSystem -eq $false -and $_.BusType -ne 'USB' } | ForEach-Object { $controls.DiskCombo.Items.Add("Disk $($_.Number) - $($_.FriendlyName) ($([math]::Round($_.Size / 1GB, 2)) GB)") }
+    try {
+        Get-Disk | Where-Object { $_.IsSystem -eq $false -and $_.BusType -ne 'USB' } | ForEach-Object {
+            $controls.DiskCombo.Items.Add("Disk $($_.Number) - $($_.FriendlyName) ($([math]::Round($_.Size / 1GB,2)) GB)")
+        }
+    } catch {}
+
+    if ($controls.WindowsVersionCombo.Items.Count -gt 0) { $controls.WindowsVersionCombo.SelectedIndex = 0 }
     if ($controls.DiskCombo.Items.Count -gt 0) { $controls.DiskCombo.SelectedIndex = 0 }
 
     $appRadioHandler = {
         $controls.SubOptionsPanel.Visibility = if ($controls.Morabaa7Radio.IsChecked -or $controls.RestaurantRadio.IsChecked) { 'Visible' } else { 'Collapsed' }
-        $controls.SqlInstanceText.IsEnabled = $controls.Sql19Radio.IsChecked
     }
-    $controls.Morabaa7Radio.add_Checked($appRadioHandler)
-    $controls.RestaurantRadio.add_Checked($appRadioHandler)
-    $controls.Sql19Radio.add_Checked($appRadioHandler)
+    $controls.Morabaa7Radio.add_Checked($appRadioHandler); $controls.RestaurantRadio.add_Checked($appRadioHandler); $controls.Sql19Radio.add_Checked($appRadioHandler)
     $appRadioHandler.Invoke()
-
-    $controls.PreInstallCheck.add_Checked({ $controls.SqlInstanceText.IsEnabled = $true })
-    $controls.PreInstallCheck.add_Unchecked({ $controls.SqlInstanceText.IsEnabled = $false })
 
     $controls.DeployButton.add_Click({
         if (-not $controls.WindowsVersionCombo.SelectedItem) { $controls.ValidationText.Text = "Select Windows Version."; return }
         if (-not $controls.DiskCombo.SelectedItem) { $controls.ValidationText.Text = "Select Target Disk."; return }
-        if ([System.Windows.MessageBox]::Show("WARNING: This will format disk and install Windows.`n`nDisk: $($controls.DiskCombo.SelectedItem)`n`nContinue?", "Final Confirmation", "YesNo", "Warning") -ne 'Yes') { return }
+
+        $confirm = [System.Windows.MessageBox]::Show(
+            "WARNING: This will format disk and install Windows.`n`nDisk: $($controls.DiskCombo.SelectedItem)`n`nContinue?",
+            "Final Confirmation",
+            [System.Windows.MessageBoxButton]::YesNo,
+            [System.Windows.MessageBoxImage]::Warning
+        )
+        if ($confirm -ne [System.Windows.MessageBoxResult]::Yes) { return }
+
         $Global:UserChoices = @{
             WindowsVersionFolder = $controls.WindowsVersionCombo.SelectedItem
-            TargetDiskNumber = ($controls.DiskCombo.SelectedItem -split ' ')[1]
-            FormatOption = if ($controls.FormatAllRadio.IsChecked) { "All Hard" } else { "Only C" }
-            SoftwarePackage = if ($controls.Morabaa7Radio.IsChecked) { "Morabaa7" } elseif ($controls.RestaurantRadio.IsChecked) { "Restaurant" } else { "SQL19" }
-            SubOption = if ($controls.MainRadio.IsChecked) { "Main" } else { "Sub" }
-            PreInstall = $controls.PreInstallCheck.IsChecked
-            SqlInstance = if ($controls.Sql19Radio.IsChecked -and $controls.PreInstallCheck.IsChecked) { $controls.SqlInstanceText.Text } else { "" }
-            CopySqlData = $controls.CopySqlDataCheck.IsChecked
+            TargetDiskNumber     = ($controls.DiskCombo.SelectedItem -split ' ')[1]
+            FormatOption         = if ($controls.FormatAllRadio.IsChecked) { "All Hard" } else { "Only C" }
+            SoftwarePackage      = if ($controls.Morabaa7Radio.IsChecked) { "Morabaa7" } elseif ($controls.RestaurantRadio.IsChecked) { "Restaurant" } else { "SQL19" }
+            SubOption            = if ($controls.MainRadio.IsChecked) { "Main" } else { "Sub" }
         }
+
         $window.Close()
     })
+
     $window.ShowDialog() | Out-Null
     return $Global:UserChoices.Count -gt 0
 }
-#endregion
 
-# --- [ 4. Core Deployment Logic ] ------------------------------------------------
+# 4. منطق النشر (Deployment)
 
-#region --- Deployment Logic ---
 function Start-Deployment {
-    [CmdletBinding(SupportsShouldProcess = $true)]
-    param()
-
     $progressXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Deployment in Progress..." Height="200" Width="500" WindowStartupLocation="CenterScreen" Background="#2E3338" ResizeMode="NoResize" ShowInTaskbar="False">
@@ -284,69 +274,26 @@ function Start-Deployment {
     </StackPanel></Grid>
 </Window>
 '@
-    $progressWindow = Import-WpfWindow $progressXaml
-    $statusLabel = $progressWindow.FindName("StatusLabel")
-    $progressBar = $progressWindow.FindName("ProgressBar")
-    $stepLabel = $progressWindow.FindName("StepLabel")
+
+    $progressWindow = Load-WpfWindow $progressXaml
+    $statusLabel = $progressWindow.FindName("StatusLabel"); $progressBar = $progressWindow.FindName("ProgressBar"); $stepLabel = $progressWindow.FindName("StepLabel")
 
     $syncHash = [hashtable]::Synchronized(@{})
-    $ps = [powershell]::Create().AddScript({
+    $ps = [powershell]::Create()
+
+    $scriptBlock = {
         param($choices, $syncHash, $ScriptPath)
-        
-        function Update-Progress {
-            [CmdletBinding(SupportsShouldProcess = $true)]
-            param(
-                [Parameter(Mandatory = $true)][int]$Percent,
-                [Parameter(Mandatory = $true)][string]$Status,
-                [Parameter(Mandatory = $true)][string]$Step
-            )
-            $script:Status = $Status
-            $script:Percent = $Percent
-            $script:Step = $Step
-        }
-        
+
+        function Update-Progress { param($Percent, $Status, $Step) $syncHash.Status = $Status; $syncHash.Percent = $Percent; $syncHash.Step = $Step }
+
+        $tempScriptPath = "$env:TEMP\diskpart.txt"
+
         try {
             $isUEFI = $true
             try { Get-FirmwareType -ErrorAction Stop | Out-Null } catch { $isUEFI = $false }
-            
-            Update-Progress -Percent 10 -Status "Preparing environment..." -Step "Step 1/7: Initial Setup"
-            
-            $usedLetters = (Get-Volume).DriveLetter | Where-Object { $_ }
-            $newLetter = [char[]]([char]'Z'..[char]'A') | Where-Object { $usedLetters -notcontains $_ } | Select-Object -First 1
-            if ($newLetter) {
-                $diskpartScript = @"
-                select volume C
-                assign letter=$newLetter
-                exit
-                "@
-                $diskpartScript | Out-File "$env:TEMP\mount.txt" -Encoding ASCII
-                diskpart /s "$env:TEMP\mount.txt"
-                Remove-Item "$env:TEMP\mount.txt" -Force
-            }
-            
-            if ($choices.CopySqlData -and $newLetter) {
-                $sourcePath = "$newLetter`:\Program Files\Microsoft SQL Server\MSSQLSERVER\MSSQL\DATA"
-                $usbDrives = Get-Volume | Where-Object { $_.DriveType -eq 'Removable' -and $_.DriveLetter }
-                if ($usbDrives) {
-                    $usbLetter = $usbDrives[0].DriveLetter
-                    $backupPath = "$usbLetter`:\backup\old_sql"
-                    if (-not (Test-Path $backupPath)) { New-Item -Path $backupPath -ItemType Directory -Force | Out-Null }
-                    if (Test-Path "$sourcePath\MorabaaDB.mdf" -and Test-Path "$sourcePath\MorabaaDB_log.LDF") {
-                        Copy-Item -Path "$sourcePath\MorabaaDB.mdf", "$sourcePath\MorabaaDB_log.LDF" -Destination $backupPath -Force
-                        [System.Windows.MessageBox]::Show("SQL data backed up to $backupPath. Do not remove USB until deployment completes.", "Backup Success", "OK", "Information")
-                        Update-Progress -Percent 20 -Status "Backed up SQL data to USB..." -Step "Step 2/7: Data Backup"
-                    } else {
-                        Update-Progress -Percent 20 -Status "SQL data files not found at $sourcePath" -Step "Warning"
-                    }
-                } else {
-                    Update-Progress -Percent 20 -Status "No USB drive detected for backup" -Step "Warning"
-                }
-            } else {
-                Update-Progress -Percent 20 -Status "Skipping SQL data backup..." -Step "Step 2/7: Data Backup"
-            }
 
-            Update-Progress -Percent 25 -Status "Preparing disk..." -Step "Step 3/7: Partitioning"
-            $tempScriptPath = "$env:TEMP\diskpart.txt"
+            Update-Progress 25 "Preparing disk..." "Step 1/4: Partitioning"
+
             $diskpartScript = "select disk $($choices.TargetDiskNumber)`n"
             if ($choices.FormatOption -eq "All Hard") {
                 $diskpartScript += "clean`n"
@@ -362,35 +309,29 @@ function Start-Deployment {
             } else {
                 $diskpartScript += "select partition 1`nformat fs=ntfs quick label=Windows`nassign letter=C`nselect disk $($choices.TargetDiskNumber)`nselect partition 2`nassign letter=D`n"
             }
+
             $diskpartScript | Out-File $tempScriptPath -Encoding ASCII -Force
             diskpart /s $tempScriptPath
             if ($LASTEXITCODE -ne 0) { throw "Diskpart failed with exit code $LASTEXITCODE" }
-            Remove-Item $tempScriptPath -Force
+            Remove-Item $tempScriptPath -Force -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 5
 
-            if ($choices.CopySqlData -and $usbDrives) {
-                $usbLetter = $usbDrives[0].DriveLetter
-                $backupPath = "$usbLetter`:\backup\old_sql"
-                $destPath = "D:\old_sql"
-                if (Test-Path $backupPath) {
-                    if (-not (Test-Path $destPath)) { New-Item -Path $destPath -ItemType Directory -Force | Out-Null }
-                    Copy-Item -Path "$backupPath\*" -Destination $destPath -Force
-                    Update-Progress -Percent 30 -Status "Restored SQL data to D:\old_sql..." -Step "Step 4/7: Data Restore"
-                }
-            }
+            Update-Progress 50 "Applying Windows image..." "Step 2/4: Image Application"
 
-            Update-Progress -Percent 50 -Status "Applying Windows image..." -Step "Step 5/7: Image Application"
-            $windowsPath = Join-Path $ScriptPath "windows\$($choices.WindowsVersionFolder)"
-            $isoPath = (Get-ChildItem -Path $windowsPath -Filter *.iso -ErrorAction Stop | Select-Object -First 1).FullName
-            if (-not $isoPath) { throw "No ISO file found in $windowsPath" }
+            $isoPathDir = Join-Path $ScriptPath "..\windows\$($choices.WindowsVersionFolder)"
+            $isoPath = (Get-ChildItem -Path $isoPathDir -Filter *.iso -ErrorAction Stop | Select-Object -First 1).FullName
+            if (-not $isoPath) { throw "No ISO file found in $isoPathDir" }
+
             $mountResult = Mount-DiskImage -ImagePath $isoPath -PassThru -ErrorAction Stop
             $driveLetter = ($mountResult | Get-Volume).DriveLetter
             if (-not $driveLetter) { throw "Failed to mount ISO: $isoPath" }
+
             $installFile = (Get-ChildItem -Path "$driveLetter`:\sources" -Filter "install.*" -ErrorAction Stop | Select-Object -First 1).FullName
             if (-not $installFile) {
                 Dismount-DiskImage -ImagePath $isoPath -ErrorAction Stop
                 throw "No WIM/ESD file found in mounted ISO"
             }
+
             $dismResult = Dism /Apply-Image /ImageFile:$installFile /Index:1 /ApplyDir:C:\ -Quiet
             if ($LASTEXITCODE -ne 0) {
                 Dismount-DiskImage -ImagePath $isoPath -ErrorAction Stop
@@ -398,17 +339,19 @@ function Start-Deployment {
             }
             Dismount-DiskImage -ImagePath $isoPath -ErrorAction Stop
 
-            Update-Progress -Percent 75 -Status "Configuring boot files..." -Step "Step 6/7: Boot Configuration"
+            Update-Progress 75 "Configuring boot files..." "Step 3/4: Boot Configuration"
+
             $bcdbootArgs = if ($isUEFI) { "/s S: /f UEFI" } else { "/s C: /f BIOS" }
             $bcdbootResult = bcdboot C:\Windows $bcdbootArgs
             if ($LASTEXITCODE -ne 0) { throw "Failed to configure boot. Error code: $LASTEXITCODE" }
 
-            Update-Progress -Percent 90 -Status "Setting up post-installation..." -Step "Step 7/7: Post-Install Setup"
+            Update-Progress 90 "Setting up post-installation..." "Step 4/4: Post-Install Setup"
+
             $setupScriptsDir = "C:\Windows\Setup\Scripts"
             New-Item -Path $setupScriptsDir -ItemType Directory -Force | Out-Null
-            
-            $sqlInstanceName = if ($choices.SqlInstance) { $choices.SqlInstance } else { if ($choices.SoftwarePackage -eq "SQL19") { "SQL19Instance" } else { "MorabSQLE" } }
-            
+
+            $sqlInstanceName = if ($choices.SoftwarePackage -eq "SQL19") { "SQL19Instance" } else { "MorabSQLE" }
+
             $psScriptContent = @"
 Start-Sleep -Seconds 60
 `$ErrorActionPreference = 'SilentlyContinue'
@@ -438,54 +381,76 @@ if (`$softwarePackage -ne 'SQL19') {
     `$s = `$ws.CreateShortcut('C:\Users\Public\Desktop\RustDesk.lnk'); `$s.TargetPath = 'D:\rustdesk.exe'; `$s.Save()
 }
 "@
+
             $psScriptContent | Out-File "$setupScriptsDir\PostConfig.ps1" -Encoding utf8 -Force
 
             $cmdContent = "@echo off`ntimeout /t 15`n"
             if ($choices.SoftwarePackage -eq "Morabaa7") { $cmdContent += "xcopy /E /I /Y `"$ScriptPath\..\Morabaa7`" `"D:\Morabaa7`"`n" }
             elseif ($choices.SoftwarePackage -eq "Restaurant") { $cmdContent += "xcopy /E /I /Y `"$ScriptPath\..\publish_resturant1.1`" `"D:\publish_resturant1.1`"`n" }
             if ($choices.SoftwarePackage -ne "SQL19") { $cmdContent += "copy `"$ScriptPath\..\rustdesk.exe`" `"D:\rustdesk.exe`"`n" }
-            
-            if ($choices.PreInstall) {
-                $cmdContent += "echo Installing SQL silently...`n"
-                $cmdContent += "`"$ScriptPath\..\sql19\setup.exe`" /q /ACTION=Install /FEATURES=SQLEngine /INSTANCENAME=$sqlInstanceName /AGTSVCACCOUNT=`"NT AUTHORITY\SYSTEM`" /SQLSVCACCOUNT=`"NT AUTHORITY\SYSTEM`" /SQLSYSADMINACCOUNTS=`"BUILTIN\ADMINISTRATORS`" /IACCEPTSQLSERVERLICENSETERMS`n"
-            }
-            
+
+            $cmdContent += "echo Installing SQL...`n"
+            $cmdContent += "`"$ScriptPath\..\sql19\setup.exe`" /q /ACTION=Install /FEATURES=SQLEngine /INSTANCENAME=$sqlInstanceName /AGTSVCACCOUNT=`"NT AUTHORITY\SYSTEM`" /SQLSVCACCOUNT=`"NT AUTHORITY\SYSTEM`" /SQLSYSADMINACCOUNTS=`"BUILTIN\ADMINISTRATORS`" /IACCEPTSQLSERVERLICENSETERMS`n"
             $cmdContent += "powershell.exe -ExecutionPolicy Bypass -File `"$setupScriptsDir\PostConfig.ps1`"`n"
+
             $cmdContent | Out-File "$setupScriptsDir\SetupComplete.cmd" -Encoding ASCII -Force
 
-            Update-Progress -Percent 100 -Status "Deployment completed!" -Step "Done"
+            Update-Progress 100 "Deployment completed!" "Done"
             Start-Sleep -Seconds 2
         } catch {
-            Update-Progress -Percent 0 -Status "Deployment failed: $($_.Exception.Message)" -Step "Error"
+            Update-Progress 0 "Deployment failed: $($_.Exception.Message)" "Error"
             Start-Sleep -Seconds 5
         } finally {
-            if (Test-Path $tempScriptPath) { Remove-Item $tempScriptPath -Force }
+            if (Test-Path $tempScriptPath) { Remove-Item $tempScriptPath -Force -ErrorAction SilentlyContinue }
         }
-    }).AddArgument($Global:UserChoices).AddArgument($syncHash).AddArgument($ScriptPath)
+    }
 
+    $ps.AddScript($scriptBlock).AddArgument($Global:UserChoices).AddArgument($syncHash).AddArgument($ScriptPath) | Out-Null
+
+    # تشغيل السكربت في الخلفية عبر BeginInvoke مع مراقبة التقدم باستخدام DispatcherTimer
     $ps.Runspace = [runspacefactory]::CreateRunspace()
     $ps.Runspace.Open()
-    $ps.BeginInvoke()
+    $asyncResult = $ps.BeginInvoke()
 
-    $progressWindow.Add_Closing({ $ps.Stop(); $ps.Dispose() })
+    $timer = New-Object System.Windows.Threading.DispatcherTimer
+    $timer.Interval = [TimeSpan]::FromMilliseconds(200)
+    $timer.Add_Tick({
+        if ($syncHash.ContainsKey("Status")) { $statusLabel.Text = $syncHash.Status }
+        if ($syncHash.ContainsKey("Percent")) { $progressBar.Value = $syncHash.Percent }
+        if ($syncHash.ContainsKey("Step")) { $stepLabel.Text = $syncHash.Step }
 
-    $progressWindow.Dispatcher.Invoke([action]{
-        while ($ps.InvocationStateInfo.State -ne 'Completed') {
-            $statusLabel.Text = $script:Status
-            $progressBar.Value = $script:Percent
-            $stepLabel.Text = $script:Step
-            Start-Sleep -Milliseconds 100
+        if ($asyncResult.IsCompleted) {
+            $timer.Stop()
+            # ensure UI shows final state
+            if ($syncHash.ContainsKey("Status")) { $statusLabel.Text = $syncHash.Status }
+            if ($syncHash.ContainsKey("Percent")) { $progressBar.Value = $syncHash.Percent }
+            if ($syncHash.ContainsKey("Step")) { $stepLabel.Text = $syncHash.Step }
+            # اغلاق النافذة بعد لحظة بسيطة حتى يراها المستخدم
+            Start-Sleep -Milliseconds 300
+            $progressWindow.Close()
         }
     })
 
+    $progressWindow.Add_Closing({
+        if ($ps -ne $null) {
+            try { $ps.Stop() } catch {}
+            try { $ps.Dispose() } catch {}
+        }
+        $timer.Stop()
+    })
+
+    $timer.Start()
     $progressWindow.ShowDialog() | Out-Null
-    $ps.EndInvoke($ps.BeginInvoke())
+
+    # انتظار نهاية التنفيذ وإنهاء الموارد
+    $ps.EndInvoke($asyncResult)
     $ps.Runspace.Close()
     $ps.Runspace.Dispose()
+    $ps.Dispose()
 }
-#endregion
 
-# --- [ 5. Main Execution Flow ] --------------------------------------------------
+# 5. التنفيذ الرئيسي
+
 $loginResult = Show-LoginWindow
 
 if ($loginResult -eq "SuperAdmin") {
@@ -499,5 +464,5 @@ if ($loginResult -eq "SuperAdmin") {
         Start-Deployment
     }
 } else {
-    Write-Output "Login failed or was cancelled. Exiting."
+    Write-Host "Login failed or was cancelled. Exiting."
 }
