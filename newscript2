@@ -76,34 +76,63 @@ function Show-LoginWindow {
 </Window>
 '@
     $window = Import-WpfWindow $xamlString
-    $passwordBox = $window.FindName("PasswordBox"); $loginButton = $window.FindName("LoginButton"); $statusText = $window.FindName("StatusText")
+    $passwordBox = $window.FindName("PasswordBox")
+    $loginButton = $window.FindName("LoginButton")
+    $statusText = $window.FindName("StatusText")
 
-    if (-not (Test-Path $ConfigFilePath)) { [System.Windows.MessageBox]::Show("Config file not found.", "Error"); return "Exit" }
+    if (-not (Test-Path $ConfigFilePath)) {
+        [System.Windows.MessageBox]::Show("Config file not found.", "Error")
+        return "Exit"
+    }
     $config = (Get-Content $ConfigFilePath -Raw) | ConvertFrom-StringData -Delimiter ':'
 
     $loginButton.add_Click({
         $enteredPassword = $passwordBox.Password
         $decryptedAdminPass = ConvertTo-DecryptedString $config.SuperAdminPass
-        if ($enteredPassword -eq $decryptedAdminPass) { $window.Tag = "SuperAdmin"; $window.Close(); return }
+        if ($enteredPassword -eq $decryptedAdminPass) {
+            $window.Tag = "SuperAdmin"
+            $window.Close()
+            return
+        }
 
         if ([string]::IsNullOrEmpty($enteredPassword)) {
-            $Global:EmergencyCounter++; $statusText.Text = "Password required. Attempt ($($Global:EmergencyCounter)/5)"
+            $Global:EmergencyCounter++
+            $statusText.Text = "Password required. Attempt ($($Global:EmergencyCounter)/5)"
             if ($Global:EmergencyCounter -ge 5) {
-                try { $webhookUrl = ConvertTo-DecryptedString $config.WebhookUrl; if ($webhookUrl) { Invoke-WebRequest -Uri $webhookUrl -Method Post -Body "RECOVERY: $decryptedAdminPass" } } catch { Write-Error "Webhook failed" }
-                $window.Tag = "Exit"; $window.Close()
+                try {
+                    $webhookUrl = ConvertTo-DecryptedString $config.WebhookUrl
+                    if ($webhookUrl) { Invoke-WebRequest -Uri $webhookUrl -Method Post -Body "RECOVERY: $decryptedAdminPass" }
+                } catch { Write-Error "Webhook failed" }
+                $window.Tag = "Exit"
+                $window.Close()
             }
             return
         }
 
-        $statusText.Text = "Verifying..."; $window.UpdateLayout()
-        if ($Global:OfflineMode) { $window.Tag = "User"; $window.Close(); return }
-        if (-not (Test-Connection -ComputerName (ConvertTo-DecryptedString $config.TestServer) -Count 1 -Quiet)) { $statusText.Text = "Internet required."; return }
+        $statusText.Text = "Verifying..."
+        $window.UpdateLayout()
+        if ($Global:OfflineMode) {
+            $window.Tag = "User"
+            $window.Close()
+            return
+        }
+        if (-not (Test-Connection -ComputerName (ConvertTo-DecryptedString $config.TestServer) -Count 1 -Quiet)) {
+            $statusText.Text = "Internet required."
+            return
+        }
 
         try {
             $passwordUrl = ConvertTo-DecryptedString $config.DriveUrl
             $encryptedPassFromWeb = (Invoke-WebRequest -Uri $passwordUrl -UseBasicParsing).Content.Trim()
-            if ($enteredPassword -eq (ConvertTo-DecryptedString $encryptedPassFromWeb)) { $window.Tag = "User"; $window.Close() } else { $statusText.Text = "Incorrect password." }
-        } catch { $statusText.Text = "Error fetching password." }
+            if ($enteredPassword -eq (ConvertTo-DecryptedString $encryptedPassFromWeb)) {
+                $window.Tag = "User"
+                $window.Close()
+            } else {
+                $statusText.Text = "Incorrect password."
+            }
+        } catch {
+            $statusText.Text = "Error fetching password."
+        }
     })
     $window.ShowDialog() | Out-Null
     return $window.Tag
@@ -126,13 +155,16 @@ function Show-AdminDashboard {
 </Window>
 '@
     $window = Import-WpfWindow $xamlString
-    $continueButton = $window.FindName("ContinueButton"); $offlineButton = $window.FindName("OfflineButton"); $reconfigureButton = $window.FindName("ReconfigureButton")
+    $continueButton = $window.FindName("ContinueButton")
+    $offlineButton = $window.FindName("OfflineButton")
+    $reconfigureButton = $window.FindName("ReconfigureButton")
 
     $continueButton.add_Click({ $window.Tag = "Continue"; $window.Close() })
     $offlineButton.add_Click({ $Global:OfflineMode = $true; $window.Tag = "Continue"; $window.Close() })
     $reconfigureButton.add_Click({
         Start-Process pwsh -ArgumentList "-ExecutionPolicy Bypass -File `"$PSScriptRoot\CreateConfig.ps1`""
-        $window.Tag = "Exit"; $window.Close()
+        $window.Tag = "Exit"
+        $window.Close()
     })
     $window.ShowDialog() | Out-Null
     return $window.Tag
@@ -186,7 +218,10 @@ function Show-MainInstallWindows {
 </Window>
 '@
     $window = Import-WpfWindow $xamlString
-    $controls = @{}; foreach ($name in @("WindowsVersionCombo", "DiskCombo", "FormatAllRadio", "FormatCRadio", "Morabaa7Radio", "RestaurantRadio", "Sql19Radio", "SubOptionsPanel", "MainRadio", "SubRadio", "DeployButton", "ValidationText", "PreInstallCheck", "SqlInstanceText", "CopySqlDataCheck")) { $controls[$name] = $window.FindName($name) }
+    $controls = @{}
+    foreach ($name in @("WindowsVersionCombo", "DiskCombo", "FormatAllRadio", "FormatCRadio", "Morabaa7Radio", "RestaurantRadio", "Sql19Radio", "SubOptionsPanel", "MainRadio", "SubRadio", "DeployButton", "ValidationText", "PreInstallCheck", "SqlInstanceText", "CopySqlDataCheck")) {
+        $controls[$name] = $window.FindName($name)
+    }
 
     $windowsPath = Join-Path $ScriptPath "windows"
     if (Test-Path $windowsPath) {
@@ -199,11 +234,14 @@ function Show-MainInstallWindows {
     Get-Disk | Where-Object { $_.IsSystem -eq $false -and $_.BusType -ne 'USB' } | ForEach-Object { $controls.DiskCombo.Items.Add("Disk $($_.Number) - $($_.FriendlyName) ($([math]::Round($_.Size / 1GB, 2)) GB)") }
     if ($controls.DiskCombo.Items.Count -gt 0) { $controls.DiskCombo.SelectedIndex = 0 }
 
-    $appRadioHandler = { 
+    $appRadioHandler = {
         $controls.SubOptionsPanel.Visibility = if ($controls.Morabaa7Radio.IsChecked -or $controls.RestaurantRadio.IsChecked) { 'Visible' } else { 'Collapsed' }
         $controls.SqlInstanceText.IsEnabled = $controls.Sql19Radio.IsChecked
     }
-    $controls.Morabaa7Radio.add_Checked($appRadioHandler); $controls.RestaurantRadio.add_Checked($appRadioHandler); $controls.Sql19Radio.add_Checked($appRadioHandler); $appRadioHandler.Invoke()
+    $controls.Morabaa7Radio.add_Checked($appRadioHandler)
+    $controls.RestaurantRadio.add_Checked($appRadioHandler)
+    $controls.Sql19Radio.add_Checked($appRadioHandler)
+    $appRadioHandler.Invoke()
 
     $controls.PreInstallCheck.add_Checked({ $controls.SqlInstanceText.IsEnabled = $true })
     $controls.PreInstallCheck.add_Unchecked({ $controls.SqlInstanceText.IsEnabled = $false })
@@ -213,9 +251,12 @@ function Show-MainInstallWindows {
         if (-not $controls.DiskCombo.SelectedItem) { $controls.ValidationText.Text = "Select Target Disk."; return }
         if ([System.Windows.MessageBox]::Show("WARNING: This will format disk and install Windows.`n`nDisk: $($controls.DiskCombo.SelectedItem)`n`nContinue?", "Final Confirmation", "YesNo", "Warning") -ne 'Yes') { return }
         $Global:UserChoices = @{
-            WindowsVersionFolder = $controls.WindowsVersionCombo.SelectedItem; TargetDiskNumber = ($controls.DiskCombo.SelectedItem -split ' ')[1]
-            FormatOption = if ($controls.FormatAllRadio.IsChecked) { "All Hard" } else { "Only C" }; SoftwarePackage = if ($controls.Morabaa7Radio.IsChecked) { "Morabaa7" } elseif ($controls.RestaurantRadio.IsChecked) { "Restaurant" } else { "SQL19" }
-            SubOption = if ($controls.MainRadio.IsChecked) { "Main" } else { "Sub" }; PreInstall = $controls.PreInstallCheck.IsChecked
+            WindowsVersionFolder = $controls.WindowsVersionCombo.SelectedItem
+            TargetDiskNumber = ($controls.DiskCombo.SelectedItem -split ' ')[1]
+            FormatOption = if ($controls.FormatAllRadio.IsChecked) { "All Hard" } else { "Only C" }
+            SoftwarePackage = if ($controls.Morabaa7Radio.IsChecked) { "Morabaa7" } elseif ($controls.RestaurantRadio.IsChecked) { "Restaurant" } else { "SQL19" }
+            SubOption = if ($controls.MainRadio.IsChecked) { "Main" } else { "Sub" }
+            PreInstall = $controls.PreInstallCheck.IsChecked
             SqlInstance = if ($controls.Sql19Radio.IsChecked -and $controls.PreInstallCheck.IsChecked) { $controls.SqlInstanceText.Text } else { "" }
             CopySqlData = $controls.CopySqlDataCheck.IsChecked
         }
@@ -244,9 +285,12 @@ function Start-Deployment {
 </Window>
 '@
     $progressWindow = Import-WpfWindow $progressXaml
-    $statusLabel = $progressWindow.FindName("StatusLabel"); $progressBar = $progressWindow.FindName("ProgressBar"); $stepLabel = $progressWindow.FindName("StepLabel")
+    $statusLabel = $progressWindow.FindName("StatusLabel")
+    $progressBar = $progressWindow.FindName("ProgressBar")
+    $stepLabel = $progressWindow.FindName("StepLabel")
 
-    $syncHash = [hashtable]::Synchronized(@{}); $ps = [powershell]::Create().AddScript({
+    $syncHash = [hashtable]::Synchronized(@{})
+    $ps = [powershell]::Create().AddScript({
         param($choices, $syncHash, $ScriptPath)
         
         function Update-Progress {
@@ -262,7 +306,8 @@ function Start-Deployment {
         }
         
         try {
-            $isUEFI = $true; try { Get-FirmwareType -ErrorAction Stop | Out-Null } catch { $isUEFI = $false }
+            $isUEFI = $true
+            try { Get-FirmwareType -ErrorAction Stop | Out-Null } catch { $isUEFI = $false }
             
             Update-Progress -Percent 10 -Status "Preparing environment..." -Step "Step 1/7: Initial Setup"
             
@@ -305,7 +350,11 @@ function Start-Deployment {
             $diskpartScript = "select disk $($choices.TargetDiskNumber)`n"
             if ($choices.FormatOption -eq "All Hard") {
                 $diskpartScript += "clean`n"
-                if ($isUEFI) { $diskpartScript += "convert gpt`ncreate partition efi size=100`nformat fs=fat32 quick label=System`nassign letter=S`ncreate partition msr size=16`n" } else { $diskpartScript += "convert mbr`n" }
+                if ($isUEFI) {
+                    $diskpartScript += "convert gpt`ncreate partition efi size=100`nformat fs=fat32 quick label=System`nassign letter=S`ncreate partition msr size=16`n"
+                } else {
+                    $diskpartScript += "convert mbr`n"
+                }
                 $cSize = [math]::Round(((Get-Disk -Number $choices.TargetDiskNumber).Size / 3) / 1MB)
                 $diskpartScript += "create partition primary size=$cSize`nformat fs=ntfs quick label=Windows`nassign letter=C`n"
                 if (-not $isUEFI) { $diskpartScript += "active`n" }
