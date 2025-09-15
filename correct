@@ -1,1 +1,27 @@
-12
+    $syncHash = [hashtable]::Synchronized(@{}); $ps = [powershell]::Create().AddScript({
+        param($choices, $syncHash, $ScriptPath)
+        
+        function Update-Progress {
+            [CmdletBinding(SupportsShouldProcess = $true)]
+            param(
+                [Parameter(Mandatory = $true)][int]$Percent,
+                [Parameter(Mandatory = $true)][string]$Status,
+                [Parameter(Mandatory = $true)][string]$Step
+            )
+            $script:Status = $Status
+            $script:Percent = $Percent
+            $script:Step = $Step
+        }
+        
+        try {
+            $isUEFI = $true; try { Get-FirmwareType -ErrorAction Stop | Out-Null } catch { $isUEFI = $false }
+            # (استمر بالكود السابق هنا حتى نهاية الكود الداخلي)
+            Update-Progress -Percent 100 -Status "Deployment completed!" -Step "Done"
+            Start-Sleep -Seconds 2
+        } catch {
+            Update-Progress -Percent 0 -Status "Deployment failed: $($_.Exception.Message)" -Step "Error"
+            Start-Sleep -Seconds 5
+        } finally {
+            if (Test-Path $tempScriptPath) { Remove-Item $tempScriptPath -Force }
+        }
+    }).AddArgument($Global:UserChoices).AddArgument($syncHash).AddArgument($ScriptPath)
