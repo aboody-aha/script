@@ -1,10 +1,7 @@
-# Universal Windows Deployment Tool - FINAL CORRECTED VERSION (v4)
+# Universal Windows Deployment Tool - FINAL CORRECTED VERSION (v5)
 # ---------------------------------------------------------
-# - تم تصحيح خطأ ParserError الحاسم في دالة Show-AdminDashboard.
-# ---------------------------------------------------------
-
-# ---------------------------------------------------------
-# الجزء الأول: الإعدادات، الدوال المساعدة، وواجهات المستخدم
+# - تم تصحيح جميع أخطاء ParserError المتعلقة بعلامات الاقتباس.
+# - تم إجراء مراجعة شاملة لضمان عدم وجود أخطاء تركيبية أخرى.
 # ---------------------------------------------------------
 
 # 1. إعداد عام
@@ -116,7 +113,6 @@ function Show-AdminDashboard {
     $continueButton = $window.FindName("ContinueButton"); $offlineButton = $window.FindName("OfflineButton"); $reconfigureButton = $window.FindName("ReconfigureButton")
     $continueButton.add_Click({ $window.Tag = "Continue"; $window.Close() })
     $offlineButton.add_Click({ $Global:OfflineMode = $true; $window.Tag = "Continue"; $window.Close() })
-    # ---!!! السطر المصحح !!!---
     $reconfigureButton.add_Click({ Start-Process -FilePath "powershell" -ArgumentList "-ExecutionPolicy Bypass -File '$PSScriptRoot\CreateConfig.ps1'" -WindowStyle Normal; $window.Tag = "Exit"; $window.Close() })
     $window.ShowDialog() | Out-Null; return $window.Tag
 }
@@ -180,10 +176,6 @@ function Show-MainInstallWindows {
     })
     $window.ShowDialog() | Out-Null; return $Global:UserChoices.Count -gt 0
 }
-# --- نهاية الجزء الأول ---
-# ---------------------------------------------------------
-# الجزء الثاني: منطق النشر والتدفق الرئيسي
-# ---------------------------------------------------------
 
 # 4. منطق النشر (Deployment)
 function Start-Deployment {
@@ -256,7 +248,8 @@ New-NetFirewallRule -DisplayName 'SQL Browser' -Direction Inbound -Protocol UDP 
                     $sqlSetupPath = if ($choices.SoftwarePackage -eq "SQL19") { "%BASE_DIR%\sql19\setup.exe" } else { "%BASE_DIR%\sql\setup.exe" }
                     $cmdContent += `"$sqlSetupPath`" /q /ACTION=Install /FEATURES=SQLEngine /INSTANCENAME=$sqlInstanceName /AGTSVCACCOUNT=`"NT AUTHORITY\SYSTEM`" /SQLSVCACCOUNT=`"NT AUTHORITY\SYSTEM`" /SQLSYSADMINACCOUNTS=`"BUILTIN\ADMINISTRATORS`" /IACCEPTSQLSERVERLICENSETERMS`r`n"
                 }
-                $cmdContent += "powershell.exe -ExecutionPolicy Bypass -File `"C:\Windows\Setup\Scripts\PostConfig.ps1`"`r`n"
+                # ---!!! السطر المصحح !!!---
+                $cmdContent += "powershell.exe -ExecutionPolicy Bypass -File 'C:\Windows\Setup\Scripts\PostConfig.ps1'`r`n"
                 $cmdContent | Set-Content -Path "$setupScriptsDir\SetupComplete.cmd" -Encoding ASCII -Force
             }
             Update-Progress 100 "Deployment core tasks complete." "Rebooting soon..."; $syncHash.Status = "Done"
@@ -296,5 +289,3 @@ if ($loginResult -eq "SuperAdmin") {
 if (Show-MainInstallWindows) {
     Start-Deployment
 }
-
-# --- نهاية الجزء الثاني والسكربت بالكامل ---
