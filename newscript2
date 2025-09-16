@@ -1,24 +1,26 @@
-# Universal Windows Deployment Tool - FINAL CORRECTED VERSION (v5)
+# Universal Windows Deployment Tool - FINAL CORRECTED VERSION (v5.1)
 # ---------------------------------------------------------
 # - تم تصحيح جميع أخطاء ParserError المتعلقة بعلامات الاقتباس.
 # - تم إجراء مراجعة شاملة لضمان عدم وجود أخطاء تركيبية أخرى.
+# - تم تعديل مسار ملف التكوين ليعمل مع ملف BAT
 # ---------------------------------------------------------
 
 # 1. إعداد عام
 $OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName PresentationFramework, System.Windows.Forms
 
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    [System.Windows.MessageBox]::Show("This script must be run as Administrator.","Error",[System.Windows.MessageBoxButton]::OK,[System.Windows.MessageBoxImage]::Error)
-    exit
-}
-
-$ScriptPath = (Get-Location).Path
-$PSScriptRoot = $ScriptPath # للحفاظ على التوافقية مع المتغير المستخدم
-$ConfigFilePath = Join-Path $ScriptPath "config.dat"
+# استخدام المسار الصحيح المطلق بدلاً من المسار النسبي
+$PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$ConfigFilePath = Join-Path $PSScriptRoot "config.dat"
 $Global:EmergencyCounter = 0
 $Global:UserChoices = @{}
 $Global:OfflineMode = $false
+
+# التحقق من وجود ملف التكوين
+if (-not (Test-Path $ConfigFilePath)) {
+    [System.Windows.MessageBox]::Show("Config file not found at:`n$ConfigFilePath","Error",[System.Windows.MessageBoxButton]::OK,[System.Windows.MessageBoxImage]::Error)
+    exit
+}
 
 # 2. الدوال المساعدة
 function Load-ConfigFile { param([string]$Path)
@@ -41,7 +43,7 @@ function Initialize-Resources {
             if ($diskList.Count -gt 0) { $resources.Disks = $diskList; break }
         } catch {}; Start-Sleep -Seconds $retryInterval
     }
-    $windowsDir = Join-Path (Split-Path $ScriptPath -Parent) "windows"
+    $windowsDir = Join-Path $PSScriptRoot "windows"
     for ($i = 1; $i -le $maxRetries; $i++) {
         if (Test-Path $windowsDir) {
             try {
@@ -220,7 +222,7 @@ function Start-Deployment {
             $diskpartScript | Out-File $tempScriptPath -Encoding ASCII -Force
             diskpart /s $tempScriptPath; if ($LASTEXITCODE -ne 0) { throw "Diskpart failed. Check script at $tempScriptPath" }; Remove-Item $tempScriptPath -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 5
             Update-Progress 50 "Applying Windows image..." "Step 2/4: Image Application"
-            $isoPathDir = Join-Path (Split-Path $ScriptPath -Parent) "windows\$($choices.WindowsVersionFolder)"
+            $isoPathDir = Join-Path $PSScriptRoot "windows\$($choices.WindowsVersionFolder)"
             $wimPath = Join-Path $isoPathDir "sources\install.wim"
             if (-not (Test-Path $wimPath)) { throw "Windows image not found at: $wimPath" }
             $applyArgs = "/Apply-Image /ImageFile:`"$wimPath`" /Index:1 /ApplyDir:C:\"
@@ -232,7 +234,7 @@ function Start-Deployment {
             Update-Progress 100 "Error: $($_.Exception.Message)" "Deployment Failed"
         }
     }
-    $ps.AddScript($scriptBlock).AddArgument($Global:UserChoices).AddArgument($syncHash).AddArgument($ScriptPath) | Out-Null
+    $ps.AddScript($scriptBlock).AddArgument($Global:UserChoices).AddArgument($syncHash).AddArgument($PSScriptRoot) | Out-Null
     $handle = $ps.BeginInvoke()
     while (-not $handle.IsCompleted) {
         if ($syncHash.Status) { $statusLabel.Text = $syncHash.Status }; if ($syncHash.Percent) { $progressBar.Value = $syncHash.Percent }; if ($syncHash.Step) { $stepLabel.Text = $syncHash.Step }
