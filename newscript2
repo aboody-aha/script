@@ -220,72 +220,31 @@ function Start-Deployment {
             $diskpartScript | Out-File $tempScriptPath -Encoding ASCII -Force
             diskpart /s $tempScriptPath; if ($LASTEXITCODE -ne 0) { throw "Diskpart failed. Check script at $tempScriptPath" }; Remove-Item $tempScriptPath -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 5
             Update-Progress 50 "Applying Windows image..." "Step 2/4: Image Application"
-            $isoPathDir = Join-Path (Split-Path $ScriptPath -Parent) "windows\$($choices.WindowsVersionFolder)"; $isoPath = (Get-ChildItem -Path $isoPathDir -Filter *.iso -ErrorAction Stop | Select-Object -First 1).FullName; if (-not $isoPath) { throw "No ISO file found in $isoPathDir" }
-            $mountResult = Mount-DiskImage -ImagePath $isoPath -PassThru -ErrorAction Stop; $driveLetter = ($mountResult | Get-Volume).DriveLetter; if (-not $driveLetter) { throw "Failed to mount ISO: $isoPath" }
-            $installFile = (Get-ChildItem -Path "$driveLetter`:\sources" -Filter "install.*" -ErrorAction Stop | Select-Object -First 1).FullName; if (-not $installFile) { Dismount-DiskImage -ImagePath $isoPath -ErrorAction Stop; throw "No WIM/ESD file found in mounted ISO" }
-            Dism /Apply-Image /ImageFile:$installFile /Index:1 /ApplyDir:C:\; if ($LASTEXITCODE -ne 0) { Dismount-DiskImage -ImagePath $isoPath -ErrorAction Stop; throw "Failed to apply Windows image. Error code: $LASTEXITCODE" }; Dismount-DiskImage -ImagePath $isoPath -ErrorAction Stop
-            Update-Progress 75 "Configuring boot files..." "Step 3/4: Boot Configuration"
-            $bcdbootArgs = if ($isUEFI) { "C:\Windows /s S: /f UEFI" } else { "C:\Windows /s C: /f BIOS" }; bcdboot $bcdbootArgs; if ($LASTEXITCODE -ne 0) { throw "Failed to configure boot. Error code: $LASTEXITCODE" }
-            Update-Progress 90 "Setting up post-installation..." "Step 4/4: Post-Install Setup"
-            $setupScriptsDir = "C:\Windows\Setup\Scripts"; New-Item -Path $setupScriptsDir -ItemType Directory -Force | Out-Null
-            if ($choices.AppEnabled) {
-                $sqlInstanceName = if ($choices.SoftwarePackage -eq "SQL19") { if ([string]::IsNullOrEmpty($choices.SqlInstanceName)) { "SQL19Instance" } else { $choices.SqlInstanceName } } else { "MorabSQLE" }
-                $psScriptContent = @"
-Start-Sleep -Seconds 60; `$ErrorActionPreference = 'SilentlyContinue'; `$sqlInstance = '$sqlInstanceName'
-Add-Type -AssemblyName "Microsoft.SqlServer.SqlWmiManagement, Version=15.0.0.0, Culture=neutral, PublicKeyToken=89845dcd8080cc91"
-`$wmi = New-Object ('Microsoft.SqlServer.Management.Smo.Wmi.ManagedComputer'); `$tcp = `$wmi.ServerInstances[`$sqlInstance].ServerProtocols['Tcp']
-`$tcp.IsEnabled = `$true; `$tcp.Alter()
-New-NetFirewallRule -DisplayName 'SQL Server' -Direction Inbound -Protocol TCP -LocalPort 1433 -Action Allow
-New-NetFirewallRule -DisplayName 'SQL Browser' -Direction Inbound -Protocol UDP -LocalPort 1434 -Action Allow
-"@
-                $psScriptContent | Out-File "$setupScriptsDir\PostConfig.ps1" -Encoding utf8 -Force
-                $baseDir = Split-Path $ScriptPath -Parent
-                $cmdContent = "@echo off`r`nSET BASE_DIR=$baseDir`r`ntimeout /t 15`r`n"
-                if ($choices.SoftwarePackage -eq "Morabaa7") { $cmdContent += "xcopy /E /I /Y `"%BASE_DIR%\Morabaa7`" `"D:\Morabaa7`"`r`n" }
-                elseif ($choices.SoftwarePackage -eq "Restaurant") { $cmdContent += "xcopy /E /I /Y `"%BASE_DIR%\publish_resturant1.1`" `"D:\publish_resturant1.1`"`r`n" }
-                if ($choices.SoftwarePackage -ne "SQL19") { $cmdContent += "copy `"%BASE_DIR%\rustdesk.exe`" `"D:\rustdesk.exe`"`r`n" }
-                if ($choices.SoftwarePackage -eq "SQL19" -or $choices.SoftwarePackage -eq "Morabaa7" -or $choices.SoftwarePackage -eq "Restaurant") {
-                    $sqlSetupPath = if ($choices.SoftwarePackage -eq "SQL19") { "%BASE_DIR%\sql19\setup.exe" } else { "%BASE_DIR%\sql\setup.exe" }
-                    $cmdContent += `"$sqlSetupPath`" /q /ACTION=Install /FEATURES=SQLEngine /INSTANCENAME=$sqlInstanceName /AGTSVCACCOUNT=`"NT AUTHORITY\SYSTEM`" /SQLSVCACCOUNT=`"NT AUTHORITY\SYSTEM`" /SQLSYSADMINACCOUNTS=`"BUILTIN\ADMINISTRATORS`" /IACCEPTSQLSERVERLICENSETERMS`r`n"
-                }
-                # ---!!! السطر المصحح !!!---
-                $cmdContent += "powershell.exe -ExecutionPolicy Bypass -File 'C:\Windows\Setup\Scripts\PostConfig.ps1'`r`n"
-                $cmdContent | Set-Content -Path "$setupScriptsDir\SetupComplete.cmd" -Encoding ASCII -Force
-            }
-            Update-Progress 100 "Deployment core tasks complete." "Rebooting soon..."; $syncHash.Status = "Done"
-        } catch { $syncHash.Status = "Error: $($_.Exception.Message)" }
+            $isoPathDir = Join-Path (Split-Path $ScriptPath -Parent) "windows\$($choices.WindowsVersionFolder)"
+            $wimPath = Join-Path $isoPathDir "sources\install.wim"
+            if (-not (Test-Path $wimPath)) { throw "Windows image not found at: $wimPath" }
+            $applyArgs = "/Apply-Image /ImageFile:`"$wimPath`" /Index:1 /ApplyDir:C:\"
+            Start-Process -FilePath "dism" -ArgumentList $applyArgs -Wait -NoNewWindow; if ($LASTEXITCODE -ne 0) { throw "DISM failed to apply image" }
+            Update-Progress 75 "Configuring boot..." "Step 3/4: Boot Configuration"
+            if ($isUEFI) { bcdboot C:\Windows /s S: /f UEFI } else { bcdboot C:\Windows /s C: /f BIOS }; if ($LASTEXITCODE -ne 0) { throw "BCDBOOT failed" }
+            Update-Progress 100 "Installation complete!" "Step 4/4: Finalizing"
+        } catch {
+            Update-Progress 100 "Error: $($_.Exception.Message)" "Deployment Failed"
+        }
     }
-    $ps.AddScript($scriptBlock).AddParameters(@($Global:UserChoices, $syncHash, $ScriptPath)); $handle = $ps.BeginInvoke()
-    $progressWindow.Show()
+    $ps.AddScript($scriptBlock).AddArgument($Global:UserChoices).AddArgument($syncHash).AddArgument($ScriptPath) | Out-Null
+    $handle = $ps.BeginInvoke()
     while (-not $handle.IsCompleted) {
-        $statusLabel.Text = $syncHash.Status; $progressBar.Value = $syncHash.Percent; $stepLabel.Text = $syncHash.Step
-        $progressWindow.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Background); Start-Sleep -Milliseconds 200
+        if ($syncHash.Status) { $statusLabel.Text = $syncHash.Status }; if ($syncHash.Percent) { $progressBar.Value = $syncHash.Percent }; if ($syncHash.Step) { $stepLabel.Text = $syncHash.Step }
+        [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100
     }
     $ps.EndInvoke($handle); $ps.Dispose()
-    $finalStatus = $syncHash.Status
-    if ($finalStatus -eq "Done") {
-        $statusLabel.Text = "Completed! System will restart in 10 seconds."; $progressBar.Value = 100
-        Start-Sleep -Seconds 10; $progressWindow.Close(); Restart-Computer -Force
-    } else {
-        $statusLabel.Text = $finalStatus; $stepLabel.Text = "Deployment failed. Please check the error message."
-        $progressBar.Foreground = New-Object System.Windows.Media.SolidColorBrush([System.Windows.Media.Colors]::Red)
-        $closeButton.Visibility = 'Visible'
-    }
+    $closeButton.Visibility = 'Visible'; $progressBar.Value = 100
+    $progressWindow.ShowDialog() | Out-Null
 }
 
-# 5. التدفق الرئيسي (Main Flow)
+# 5. التدفق الرئيسي
 $loginResult = Show-LoginWindow
-if ($loginResult -eq "Exit" -or -not $loginResult) {
-    exit
-}
-
-if ($loginResult -eq "SuperAdmin") {
-    $adminChoice = Show-AdminDashboard
-    if ($adminChoice -ne "Continue") {
-        exit
-    }
-}
-
-if (Show-MainInstallWindows) {
-    Start-Deployment
-}
+if ($loginResult -eq "Exit") { exit }
+if ($loginResult -eq "SuperAdmin") { $adminResult = Show-AdminDashboard; if ($adminResult -eq "Exit") { exit } }
+if (Show-MainInstallWindows) { Start-Deployment }
