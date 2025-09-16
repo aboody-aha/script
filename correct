@@ -280,3 +280,23 @@ $window.ShowDialog() | Out-Null
 $App.Shutdown()
 
 Read-Host "Press Enter to exit"
+.
+.
+.. 
+.
+.
+.
+.
+.. 
+.
+.
+.
+$reconfigureButton.add_Click({ 
+    $configScriptPath = Join-Path $PSScriptRoot "createconfig.ps1"
+    if (Test-Path $configScriptPath) {
+        Start-Process -FilePath "powershell" -ArgumentList "-NoExit -ExecutionPolicy Bypass -File '$configScriptPath'" -WindowStyle Normal
+    } else {
+        [System.Windows.MessageBox]::Show("Config script not found at: $configScriptPath","Error",[System.Windows.MessageBoxButton]::OK,[System.Windows.MessageBoxImage]::Error)
+    }
+    $window.Tag = "Exit"; $window.Close() 
+})
