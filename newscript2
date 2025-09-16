@@ -1,11 +1,6 @@
-# Universal Windows Deployment Tool - POLISHED & FINAL VERSION (v3)
+# Universal Windows Deployment Tool - FINAL CORRECTED VERSION (v4)
 # ---------------------------------------------------------
-# - تم تطبيق جميع التحسينات لزيادة الموثوقية وتجربة المستخدم.
-# - مسارات ملفات ديناميكية وموثوقة في CMD.
-# - واجهة محسنة مع خيارات مرنة.
-# - منطق نشر مشروط لتثبيت التطبيقات.
-# - تصحيح منطق فورمات البارتشنات لزيادة الأمان.
-# - آلية استقرار للتعامل مع بيئة WinPE المتغيرة.
+# - تم تصحيح خطأ ParserError الحاسم في دالة Show-AdminDashboard.
 # ---------------------------------------------------------
 
 # ---------------------------------------------------------
@@ -22,6 +17,7 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 }
 
 $ScriptPath = (Get-Location).Path
+$PSScriptRoot = $ScriptPath # للحفاظ على التوافقية مع المتغير المستخدم
 $ConfigFilePath = Join-Path $ScriptPath "config.dat"
 $Global:EmergencyCounter = 0
 $Global:UserChoices = @{}
@@ -120,7 +116,8 @@ function Show-AdminDashboard {
     $continueButton = $window.FindName("ContinueButton"); $offlineButton = $window.FindName("OfflineButton"); $reconfigureButton = $window.FindName("ReconfigureButton")
     $continueButton.add_Click({ $window.Tag = "Continue"; $window.Close() })
     $offlineButton.add_Click({ $Global:OfflineMode = $true; $window.Tag = "Continue"; $window.Close() })
-    $reconfigureButton.add_Click({ Start-Process -FilePath "powershell" -ArgumentList "-ExecutionPolicy Bypass -File `"$PSScriptRoot\CreateConfig.ps1`"" -WindowStyle Normal; $window.Tag = "Exit"; $window.Close() })
+    # ---!!! السطر المصحح !!!---
+    $reconfigureButton.add_Click({ Start-Process -FilePath "powershell" -ArgumentList "-ExecutionPolicy Bypass -File '$PSScriptRoot\CreateConfig.ps1'" -WindowStyle Normal; $window.Tag = "Exit"; $window.Close() })
     $window.ShowDialog() | Out-Null; return $window.Tag
 }
 function Show-MainInstallWindows {
@@ -183,7 +180,6 @@ function Show-MainInstallWindows {
     })
     $window.ShowDialog() | Out-Null; return $Global:UserChoices.Count -gt 0
 }
-
 # --- نهاية الجزء الأول ---
 # ---------------------------------------------------------
 # الجزء الثاني: منطق النشر والتدفق الرئيسي
