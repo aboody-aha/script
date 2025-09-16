@@ -25,3 +25,80 @@
             if (Test-Path $tempScriptPath) { Remove-Item $tempScriptPath -Force }
         }
     }).AddArgument($Global:UserChoices).AddArgument($syncHash).AddArgument($ScriptPath)
+
+.
+.
+.
+.
+function Show-MainInstallWindows {
+    [string]$xamlString = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Deployment Tool" Height="650" Width="550" WindowStartupLocation="CenterScreen" Background="#2E3338" ResizeMode="NoResize">
+    <Grid Margin="15">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <GroupBox Header="Step 1: System Setup" Grid.Row="0" Foreground="White" FontWeight="Bold" Margin="0,5" Padding="10">
+            <StackPanel>
+                <TextBlock Text="Select Windows Version:" Foreground="#CCCCCC" Margin="0,0,0,5"/><ComboBox x:Name="WindowsVersionCombo" Height="30" Margin="0,0,0,10"/>
+                <TextBlock Text="Select Target Disk:" Foreground="#CCCCCC" Margin="0,0,0,5"/><ComboBox x:Name="DiskCombo" Height="30" Margin="0,0,0,10"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><RadioButton x:Name="FormatAllRadio" Content="Format Entire Disk" IsChecked="True" Foreground="White" Margin="0,0,20,0"/><RadioButton x:Name="FormatCRadio" Content="Format C: Only" Foreground="White"/></StackPanel>
+            </StackPanel>
+        </GroupBox>
+        <GroupBox Header="Step 2: Application Setup" Grid.Row="1" Foreground="White" FontWeight="Bold" Margin="0,10" Padding="10">
+            <StackPanel>
+                <CheckBox x:Name="EnableAppCheck" Content="Enable Application / Post-install steps" Foreground="White" IsChecked="False" Margin="0,0,0,10"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <RadioButton x:Name="Morabaa7Radio" Content="Morabaa7" GroupName="AppPackage" Foreground="White" Margin="10,0" IsEnabled="False"/>
+                    <RadioButton x:Name="RestaurantRadio" Content="Restaurant" GroupName="AppPackage" Foreground="White" Margin="10,0" IsEnabled="False"/>
+                    <RadioButton x:Name="Sql19Radio" Content="SQL19 Only" GroupName="AppPackage" Foreground="White" Margin="10,0" IsEnabled="False"/>
+                </StackPanel>
+                <StackPanel x:Name="SubOptionsPanel" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,15,0,0" Visibility="Collapsed">
+                    <RadioButton x:Name="MainRadio" Content="Main" GroupName="SubOption" IsChecked="True" Foreground="White" Margin="10,0"/><RadioButton x:Name="SubRadio" Content="Sub" GroupName="SubOption" Foreground="White" Margin="10,0"/>
+                </StackPanel>
+                <StackPanel x:Name="SqlInstancePanel" Orientation="Vertical" Margin="10,12,10,0" Visibility="Collapsed">
+                    <TextBlock Text="SQL Instance Name:" Foreground="#CCCCCC" Margin="0,0,0,5"/>
+                    <TextBox x:Name="SqlInstanceText" Height="30" FontSize="14" Background="#3C424A" Foreground="White" BorderBrush="#545D6A" Padding="5"/>
+                </StackPanel>
+            </StackPanel>
+        </GroupBox>
+        <TextBlock x:Name="ValidationText" Grid.Row="2" Foreground="#FF6347" TextAlignment="Center" VerticalAlignment="Center" MinHeight="20" TextWrapping="Wrap"/>
+        <Button x:Name="DeployButton" Content="Start Deployment" Grid.Row="3" Height="50" Background="#28A745" Foreground="White" FontSize="18" FontWeight="Bold"/>
+    </Grid>
+</Window>
+'@
+    $window = Load-WpfWindow $xamlString
+    $controls = @{}; foreach ($name in @("WindowsVersionCombo","DiskCombo","FormatAllRadio","FormatCRadio","Morabaa7Radio","RestaurantRadio","Sql19Radio","SubOptionsPanel","MainRadio","SubRadio","DeployButton","ValidationText","EnableAppCheck","SqlInstancePanel","SqlInstanceText")) { $controls[$name] = $window.FindName($name) }
+    $initResult = Initialize-Resources
+    if (-not $initResult.Success) { $controls.ValidationText.Text = $initResult.ErrorMessage; $controls.DeployButton.IsEnabled = $false }
+    else {
+        $initResult.WindowsVersions | ForEach-Object { $controls.WindowsVersionCombo.Items.Add($_) }; $initResult.Disks | ForEach-Object { $controls.DiskCombo.Items.Add($_) }
+        if ($controls.WindowsVersionCombo.Items.Count -gt 0) { $controls.WindowsVersionCombo.SelectedIndex = 0 }; if ($controls.DiskCombo.Items.Count -gt 0) { $controls.DiskCombo.SelectedIndex = 0 }
+    }
+    $appRadioHandler = {
+        if (-not $controls.EnableAppCheck.IsChecked) {
+            $controls.Morabaa7Radio.IsEnabled = $false; $controls.RestaurantRadio.IsEnabled = $false; $controls.Sql19Radio.IsEnabled = $false
+            $controls.Morabaa7Radio.IsChecked = $false; $controls.RestaurantRadio.IsChecked = $false; $controls.Sql19Radio.IsChecked = $false
+            $controls.SubOptionsPanel.Visibility = 'Collapsed'; $controls.SqlInstancePanel.Visibility = 'Collapsed'; return
+        }
+        $controls.Morabaa7Radio.IsEnabled = $true; $controls.RestaurantRadio.IsEnabled = $true; $controls.Sql19Radio.IsEnabled = $true
+        $controls.SubOptionsPanel.Visibility = if ($controls.Morabaa7Radio.IsChecked -or $controls.RestaurantRadio.IsChecked) { 'Visible' } else { 'Collapsed' }
+        $controls.SqlInstancePanel.Visibility = if ($controls.Sql19Radio.IsChecked) { 'Visible' } else { 'Collapsed' }
+    }
+    $controls.EnableAppCheck.add_Checked($appRadioHandler); $controls.EnableAppCheck.add_Unchecked($appRadioHandler); $controls.Morabaa7Radio.add_Checked($appRadioHandler); $controls.RestaurantRadio.add_Checked($appRadioHandler); $controls.Sql19Radio.add_Checked($appRadioHandler)
+    $appRadioHandler.Invoke()
+    $controls.DeployButton.add_Click({
+        if (-not $controls.WindowsVersionCombo.SelectedItem) { $controls.ValidationText.Text = "Select Windows Version."; return }; if (-not $controls.DiskCombo.SelectedItem) { $controls.ValidationText.Text = "Select Target Disk."; return }
+        if ($controls.EnableAppCheck.IsChecked) {
+            if (-not ($controls.Morabaa7Radio.IsChecked -or $controls.RestaurantRadio.IsChecked -or $controls.Sql19Radio.IsChecked)) { $controls.ValidationText.Text = "Select Application Package."; return }
+        }
+        $confirm = [System.Windows.MessageBox]::Show("WARNING: This will format disk and install Windows.`n`nDisk: $($controls.DiskCombo.SelectedItem)`n`nContinue?","Final Confirmation",[System.Windows.MessageBoxButton]::YesNo,[System.Windows.MessageBoxImage]::Warning)
+        if ($confirm -ne [System.Windows.MessageBoxResult]::Yes) { return }
+        $Global:UserChoices = @{
+            WindowsVersionFolder = $controls.WindowsVersionCombo.SelectedItem; TargetDiskNumber = ($controls.DiskCombo.SelectedItem -split ' ')[1]; FormatOption = if ($controls.FormatAllRadio.IsChecked) { "All Hard" } else { "Only C" }
+            SoftwarePackage = if (-not $controls.EnableAppCheck.IsChecked) { "" } elseif ($controls.Morabaa7Radio.IsChecked) { "Morabaa7" } elseif ($controls.RestaurantRadio.IsChecked) { "Restaurant" } else { "SQL19" }
+            SubOption = if ($controls.EnableAppCheck.IsChecked -and ($controls.Morabaa7Radio.IsChecked -or $controls.RestaurantRadio.IsChecked) -and $controls.MainRadio.IsChecked) { "Main" } else { "" }
+            AppEnabled = [bool]$controls.EnableAppCheck.IsChecked
+            SqlInstanceName = if ($controls.Sql19Radio.IsChecked -and $controls.SqlInstancePanel.Visibility -eq 'Visible') { $controls.SqlInstanceText.Text.Trim() } else { "" }
+        }; $window.Close()
+    })
+    $window.ShowDialog() | Out-Null; return $Global:UserChoices.Count -gt 0
+}
