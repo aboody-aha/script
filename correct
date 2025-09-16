@@ -138,3 +138,145 @@ function Show-AdminDashboard {
     })
     $window.ShowDialog() | Out-Null; return $window.Tag
 }
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+# =================================================================
+#               Configuration File Generator - GUI Version
+#               FINAL, GUARANTEED FIX for the AES Key Size Error.
+# =================================================================
+
+# --- [ Initial Configuration ] ---
+$OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName PresentationFramework, System.Windows.Forms, System.Xml.Linq
+
+$App = [System.Windows.Application]::new()
+$App.ShutdownMode = [System.Windows.ShutdownMode]::OnExplicitShutdown
+
+# --- [ Encryption Function - RADICALLY CORRECTED KEY DEFINITION ] ---
+
+# We are now creating the byte array for the key MANUALLY and EXPLICITLY.
+# This guarantees it is exactly 32 bytes (256 bits) long, avoiding any PowerShell string interpretation issues.
+$AesKey = [byte[]](
+    0x4D, 0x79, 0x53, 0x75, 0x70, 0x65, 0x72, 0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x50, 0x72, 0x6F,
+    0x6A, 0x65, 0x63, 0x74, 0x4B, 0x65, 0x79, 0x5F, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38
+)
+
+function Encrypt-String {
+    param([string]$StringToEncrypt)
+    $aes = New-Object System.Security.Cryptography.AesManaged
+    $aes.Key = $AesKey # This will now work without error.
+    $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC
+    $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
+    $aes.GenerateIV()
+    $encryptor = $aes.CreateEncryptor()
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($StringToEncrypt)
+    $encryptedBytes = $encryptor.TransformFinalBlock($bytes, 0, $bytes.Length)
+    $ivBytes = $aes.IV
+    [System.Convert]::ToBase64String($ivBytes + $encryptedBytes)
+}
+
+# --- [ GUI Helper Function ] ---
+function Load-WpfWindow {
+    param([xml]$xaml)
+    try {
+        $reader = $xaml.CreateNavigator().ReadSubtree()
+        return [System.Windows.Markup.XamlReader]::Load($reader)
+    } catch {
+        [System.Windows.MessageBox]::Show("Fatal Error loading GUI: $($_.Exception.Message)", "Fatal Error", "OK", "Error")
+        exit
+    }
+}
+
+# --- [ GUI Definition ] ---
+[string]$xamlString = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Initial Configuration Generator" Height="550" Width="600" WindowStartupLocation="CenterScreen" Background="#2E3338" ResizeMode="NoResize">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Configuration Generator" Foreground="White" FontSize="20" FontWeight="Bold" Margin="0,0,0,20" HorizontalAlignment="Center"/>
+
+        <StackPanel Grid.Row="1">
+            <TextBlock Text="Super Admin Password:" Foreground="#CCCCCC" Margin="0,0,0,5"/>
+            <TextBox x:Name="SuperAdminPassText" Height="30" Margin="0,0,0,15" Text="55643210"/>
+
+            <TextBlock Text="Initial User Password:" Foreground="#CCCCCC" Margin="0,0,0,5"/>
+            <TextBox x:Name="UserPassText" Height="30" Margin="0,0,0,15" Text="user123"/>
+
+            <TextBlock Text="Google Drive URL (for user pass ):" Foreground="#CCCCCC" Margin="0,0,0,5"/>
+            <TextBox x:Name="DriveUrlText" Height="30" Margin="0,0,0,15" Text="https://google.com/document/d/15isHT2Aic2ZmMPrXhX_2cbXigc1Wl8Se068WpQeN_Vs/edit?usp=drive_link"/>
+
+            <TextBlock Text="Webhook URL (for recovery ):" Foreground="#CCCCCC" Margin="0,0,0,5"/>
+            <TextBox x:Name="WebhookUrlText" Height="30" Margin="0,0,0,20" Text="https://webhook.site/c255b1a6-3d24-4d0d-b87a-99a1ecab2269"/>
+            
+            <TextBlock Text="Encrypted User Password (for Google Drive ):" Foreground="#CCCCCC" Margin="0,10,0,5"/>
+            <TextBox x:Name="EncryptedUserPassOutput" Height="30" IsReadOnly="True" Background="#444" Foreground="White"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="EncryptButton" Content="Encrypt &amp; Copy User Pass" Height="40" Width="200" Margin="0,0,10,0" Background="#007ACC" Foreground="White"/>
+            <Button x:Name="DoneButton" Content="Generate config.dat &amp; Exit" Height="40" Width="200" Background="#28A745" Foreground="White"/>
+        </StackPanel>
+    </Grid>
+</Window>
+'@
+
+# --- [ GUI Logic ] ---
+$window = Load-WpfWindow ([xml]$xamlString)
+
+# Find controls
+$controls = @{}
+"SuperAdminPassText", "UserPassText", "DriveUrlText", "WebhookUrlText", "EncryptedUserPassOutput", "EncryptButton", "DoneButton" | ForEach-Object {
+    $controls[$_] = $window.FindName($_)
+}
+
+# Encrypt Button Logic
+$controls.EncryptButton.add_Click({
+    if ([string]::IsNullOrWhiteSpace($controls.UserPassText.Text)) {
+        [System.Windows.MessageBox]::Show("Please enter a user password first.", "Warning", "OK", "Warning")
+        return
+    }
+    $encryptedUserPass = Encrypt-String $controls.UserPassText.Text
+    $controls.EncryptedUserPassOutput.Text = $encryptedUserPass
+    Set-Clipboard -Value $encryptedUserPass
+    [System.Windows.MessageBox]::Show("The encrypted user password has been generated and copied to your clipboard. Paste it into your Google Drive text file.", "Success", "OK", "Information")
+})
+
+# Done Button Logic
+$controls.DoneButton.add_Click({
+    $encryptedSuperAdminPass = Encrypt-String $controls.SuperAdminPassText.Text
+    $encryptedDriveUrl = Encrypt-String $controls.DriveUrlText.Text
+    $encryptedWebhookUrl = Encrypt-String $controls.WebhookUrlText.Text
+
+    $configFileContent = @"
+SuperAdminPass:$encryptedSuperAdminPass
+DriveUrl:$encryptedDriveUrl
+WebhookUrl:$encryptedWebhookUrl
+"@
+
+    try {
+        $configFileContent | Out-File -FilePath ".\config.dat" -Encoding utf8 -Force
+        [System.Windows.MessageBox]::Show("'config.dat' file has been created successfully!", "Success", "OK", "Information")
+        $window.Close()
+    } catch {
+        [System.Windows.MessageBox]::Show("Error writing 'config.dat': $($_.Exception.Message)", "Error", "OK", "Error")
+    }
+})
+
+# Show the window
+$window.ShowDialog() | Out-Null
+$App.Shutdown()
+
+Read-Host "Press Enter to exit"
