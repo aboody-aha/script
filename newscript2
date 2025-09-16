@@ -104,7 +104,6 @@ function Show-AdminDashboard {
     <Grid Margin="20">
         <TextBlock Text="Admin Dashboard" Foreground="White" FontSize="18" FontWeight="Bold" Margin="0,0,0,20" HorizontalAlignment="Center"/>
         <StackPanel VerticalAlignment="Center">
-            <Button x:Name="ContinueButton" Content="Continue to Deployment" Height="50" Background="#28A745" Foreground="White" FontSize="16" Margin="0,0,0,15"/>
             <Button x:Name="OfflineButton" Content="Continue in OFFLINE Mode" Height="50" Background="#FF8C00" Foreground="White" FontSize="16" Margin="0,0,0,15"/>
             <Button x:Name="ReconfigureButton" Content="Launch Config Tool" Height="50" Background="#17A2B8" Foreground="White" FontSize="16"/>
         </StackPanel>
@@ -112,10 +111,17 @@ function Show-AdminDashboard {
 </Window>
 '@
     $window = Load-WpfWindow $xamlString
-    $continueButton = $window.FindName("ContinueButton"); $offlineButton = $window.FindName("OfflineButton"); $reconfigureButton = $window.FindName("ReconfigureButton")
-    $continueButton.add_Click({ $window.Tag = "Continue"; $window.Close() })
+    $offlineButton = $window.FindName("OfflineButton"); $reconfigureButton = $window.FindName("ReconfigureButton")
     $offlineButton.add_Click({ $Global:OfflineMode = $true; $window.Tag = "Continue"; $window.Close() })
-    $reconfigureButton.add_Click({ Start-Process -FilePath "powershell" -ArgumentList "-ExecutionPolicy Bypass -File '$PSScriptRoot\CreateConfig.ps1'" -WindowStyle Normal; $window.Tag = "Exit"; $window.Close() })
+    $reconfigureButton.add_Click({ 
+    $configScriptPath = Join-Path $PSScriptRoot "createconfig.ps1"
+    if (Test-Path $configScriptPath) {
+        Start-Process -FilePath "powershell" -ArgumentList "-NoExit -ExecutionPolicy Bypass -File '$configScriptPath'" -WindowStyle Normal
+    } else {
+        [System.Windows.MessageBox]::Show("Config script not found at: $configScriptPath","Error",[System.Windows.MessageBoxButton]::OK,[System.Windows.MessageBoxImage]::Error)
+    }
+    $window.Tag = "Exit"; $window.Close() 
+})
     $window.ShowDialog() | Out-Null; return $window.Tag
 }
 function Show-MainInstallWindows {
@@ -135,9 +141,9 @@ function Show-MainInstallWindows {
             <StackPanel>
                 <CheckBox x:Name="EnableAppCheck" Content="Enable Application / Post-install steps" Foreground="White" IsChecked="False" Margin="0,0,0,10"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                    <RadioButton x:Name="Morabaa7Radio" Content="Morabaa7" GroupName="AppPackage" Foreground="White" Margin="10,0"/>
-                    <RadioButton x:Name="RestaurantRadio" Content="Restaurant" GroupName="AppPackage" Foreground="White" Margin="10,0"/>
-                    <RadioButton x:Name="Sql19Radio" Content="SQL19 Only" GroupName="AppPackage" IsChecked="True" Foreground="White" Margin="10,0"/>
+                    <RadioButton x:Name="Morabaa7Radio" Content="Morabaa7" GroupName="AppPackage" Foreground="White" Margin="10,0" IsEnabled="False"/>
+                    <RadioButton x:Name="RestaurantRadio" Content="Restaurant" GroupName="AppPackage" Foreground="White" Margin="10,0" IsEnabled="False"/>
+                    <RadioButton x:Name="Sql19Radio" Content="SQL19 Only" GroupName="AppPackage" Foreground="White" Margin="10,0" IsEnabled="False"/>
                 </StackPanel>
                 <StackPanel x:Name="SubOptionsPanel" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,15,0,0" Visibility="Collapsed">
                     <RadioButton x:Name="MainRadio" Content="Main" GroupName="SubOption" IsChecked="True" Foreground="White" Margin="10,0"/><RadioButton x:Name="SubRadio" Content="Sub" GroupName="SubOption" Foreground="White" Margin="10,0"/>
@@ -162,18 +168,30 @@ function Show-MainInstallWindows {
         if ($controls.WindowsVersionCombo.Items.Count -gt 0) { $controls.WindowsVersionCombo.SelectedIndex = 0 }; if ($controls.DiskCombo.Items.Count -gt 0) { $controls.DiskCombo.SelectedIndex = 0 }
     }
     $appRadioHandler = {
-        if (-not $controls.EnableAppCheck.IsChecked) { $controls.SubOptionsPanel.Visibility = 'Collapsed'; $controls.SqlInstancePanel.Visibility = 'Collapsed'; return }
+        if (-not $controls.EnableAppCheck.IsChecked) {
+            $controls.Morabaa7Radio.IsEnabled = $false; $controls.RestaurantRadio.IsEnabled = $false; $controls.Sql19Radio.IsEnabled = $false
+            $controls.Morabaa7Radio.IsChecked = $false; $controls.RestaurantRadio.IsChecked = $false; $controls.Sql19Radio.IsChecked = $false
+            $controls.SubOptionsPanel.Visibility = 'Collapsed'; $controls.SqlInstancePanel.Visibility = 'Collapsed'; return
+        }
+        $controls.Morabaa7Radio.IsEnabled = $true; $controls.RestaurantRadio.IsEnabled = $true; $controls.Sql19Radio.IsEnabled = $true
         $controls.SubOptionsPanel.Visibility = if ($controls.Morabaa7Radio.IsChecked -or $controls.RestaurantRadio.IsChecked) { 'Visible' } else { 'Collapsed' }
-        if ($controls.Sql19Radio.IsChecked -and $controls.EnableAppCheck.IsChecked) { $controls.SqlInstancePanel.Visibility = 'Visible' } else { $controls.SqlInstancePanel.Visibility = 'Collapsed' }
+        $controls.SqlInstancePanel.Visibility = if ($controls.Sql19Radio.IsChecked) { 'Visible' } else { 'Collapsed' }
     }
     $controls.EnableAppCheck.add_Checked($appRadioHandler); $controls.EnableAppCheck.add_Unchecked($appRadioHandler); $controls.Morabaa7Radio.add_Checked($appRadioHandler); $controls.RestaurantRadio.add_Checked($appRadioHandler); $controls.Sql19Radio.add_Checked($appRadioHandler)
     $appRadioHandler.Invoke()
     $controls.DeployButton.add_Click({
         if (-not $controls.WindowsVersionCombo.SelectedItem) { $controls.ValidationText.Text = "Select Windows Version."; return }; if (-not $controls.DiskCombo.SelectedItem) { $controls.ValidationText.Text = "Select Target Disk."; return }
+        if ($controls.EnableAppCheck.IsChecked) {
+            if (-not ($controls.Morabaa7Radio.IsChecked -or $controls.RestaurantRadio.IsChecked -or $controls.Sql19Radio.IsChecked)) { $controls.ValidationText.Text = "Select Application Package."; return }
+        }
         $confirm = [System.Windows.MessageBox]::Show("WARNING: This will format disk and install Windows.`n`nDisk: $($controls.DiskCombo.SelectedItem)`n`nContinue?","Final Confirmation",[System.Windows.MessageBoxButton]::YesNo,[System.Windows.MessageBoxImage]::Warning)
         if ($confirm -ne [System.Windows.MessageBoxResult]::Yes) { return }
         $Global:UserChoices = @{
-            WindowsVersionFolder = $controls.WindowsVersionCombo.SelectedItem; TargetDiskNumber = ($controls.DiskCombo.SelectedItem -split ' ')[1]; FormatOption = if ($controls.FormatAllRadio.IsChecked) { "All Hard" } else { "Only C" }; SoftwarePackage = if ($controls.Morabaa7Radio.IsChecked) { "Morabaa7" } elseif ($controls.RestaurantRadio.IsChecked) { "Restaurant" } else { "SQL19" }; SubOption = if ($controls.MainRadio.IsChecked) { "Main" } else { "Sub" }; AppEnabled = [bool]$controls.EnableAppCheck.IsChecked; SqlInstanceName = if ($controls.SqlInstancePanel.Visibility -eq 'Visible') { $controls.SqlInstanceText.Text.Trim() } else { "" }
+            WindowsVersionFolder = $controls.WindowsVersionCombo.SelectedItem; TargetDiskNumber = ($controls.DiskCombo.SelectedItem -split ' ')[1]; FormatOption = if ($controls.FormatAllRadio.IsChecked) { "All Hard" } else { "Only C" }
+            SoftwarePackage = if (-not $controls.EnableAppCheck.IsChecked) { "" } elseif ($controls.Morabaa7Radio.IsChecked) { "Morabaa7" } elseif ($controls.RestaurantRadio.IsChecked) { "Restaurant" } else { "SQL19" }
+            SubOption = if ($controls.EnableAppCheck.IsChecked -and ($controls.Morabaa7Radio.IsChecked -or $controls.RestaurantRadio.IsChecked) -and $controls.MainRadio.IsChecked) { "Main" } else { "" }
+            AppEnabled = [bool]$controls.EnableAppCheck.IsChecked
+            SqlInstanceName = if ($controls.Sql19Radio.IsChecked -and $controls.SqlInstancePanel.Visibility -eq 'Visible') { $controls.SqlInstanceText.Text.Trim() } else { "" }
         }; $window.Close()
     })
     $window.ShowDialog() | Out-Null; return $Global:UserChoices.Count -gt 0
