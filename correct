@@ -545,3 +545,64 @@ if ($LASTEXITCODE -ne 0) { throw "Diskpart failed. Check script at $tempScriptPa
 Remove-Item $tempScriptPath -Force -ErrorAction SilentlyContinue
 
 Start-Sleep -Seconds 5
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+# --- Step 2: Apply Windows Image ---
+Update-Progress 50 "Applying Windows image..." "Step 2/4: Image Application"
+
+$isoPathDir = Join-Path $PSScriptRoot "windows\$($choices.WindowsVersionFolder)"
+$wimPath    = Join-Path $isoPathDir "sources\install.wim"
+
+if (-not (Test-Path $wimPath)) {
+    [System.Windows.MessageBox]::Show("ملف install.wim غير موجود في:`n$wimPath", "خطأ", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+    throw "install.wim not found"
+}
+
+# تحديد أداة التطبيق
+$wimlibExe = Join-Path $PSScriptRoot "tools\wimlib-imagex.exe"
+
+try {
+    if (Test-Path $wimlibExe) {
+        # wimlib هو الأساس
+        Update-Progress 65 "Applying with wimlib..." "Step 2/4: Image Application"
+        $args = @("apply", "`"$wimPath`"", "1", "C:\")
+        $proc = Start-Process -FilePath $wimlibExe -ArgumentList $args -Wait -NoNewWindow -PassThru
+        if ($proc.ExitCode -ne 0) {
+            throw "wimlib-imagex failed with code $($proc.ExitCode)"
+        }
+    }
+    else {
+        # fallback على DISM
+        Update-Progress 65 "Applying with DISM..." "Step 2/4: Image Application"
+        $applyArgs = "/Apply-Image /ImageFile:`"$wimPath`" /Index:1 /ApplyDir:C:\"
+        $proc = Start-Process -FilePath dism.exe -ArgumentList $applyArgs -Wait -NoNewWindow -PassThru
+        if ($proc.ExitCode -ne 0) {
+            throw "DISM failed with code $($proc.ExitCode)"
+        }
+    }
+}
+catch {
+    [System.Windows.MessageBox]::Show("فشل تطبيق نسخة الويندوز:`n$($_.Exception.Message)", "خطأ", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+    throw
+}
+
+Write-Host "Windows image applied successfully."
