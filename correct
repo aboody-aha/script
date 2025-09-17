@@ -606,3 +606,56 @@ catch {
 }
 
 Write-Host "Windows image applied successfully."
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+.
+# --- Step 2: Apply Windows Image ---
+Update-Progress 50 "Applying Windows image..." "Step 2/4: Image Application"
+
+$isoPathDir = Join-Path $PSScriptRoot "windows\$($choices.WindowsVersionFolder)"
+$wimPath    = Join-Path $isoPathDir "sources\install.wim"
+$wimlibExe  = Join-Path $PSScriptRoot "tools\wimlib-imagex.exe"
+
+if (-not (Test-Path $wimPath)) {
+    [System.Windows.MessageBox]::Show("ملف install.wim غير موجود في:`n$wimPath", "خطأ", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+    throw "install.wim not found"
+}
+
+try {
+    if (Test-Path $wimlibExe) {
+        Update-Progress 65 "Applying image with wimlib..." "Step 2/4: Image Application"
+        & $wimlibExe apply "$wimPath" 1 C:\
+        if ($LASTEXITCODE -ne 0) {
+            throw "wimlib-imagex failed with exit code $LASTEXITCODE"
+        }
+    }
+    else {
+        Update-Progress 65 "Applying image with DISM..." "Step 2/4: Image Application"
+        & dism.exe /Apply-Image /ImageFile:"$wimPath" /Index:1 /ApplyDir:C:\
+        if ($LASTEXITCODE -ne 0) {
+            throw "DISM failed with exit code $LASTEXITCODE"
+        }
+    }
+}
+catch {
+    [System.Windows.MessageBox]::Show("فشل تطبيق نسخة الويندوز:`n$($_.Exception.Message)", "خطأ", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+    throw
+}
+
+Write-Host "Windows image applied successfully."
