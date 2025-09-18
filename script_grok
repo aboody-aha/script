@@ -1,6 +1,4 @@
-<# Universal Windows Deployment Tool - Complete Fixed Version for HBCD
-Save as UTF-8 without BOM. Requires config.dat next to script.
-#>
+<# Universal Windows Deployment Tool - Fixed for HBCD #>
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = "Stop"
@@ -12,16 +10,330 @@ $Global:EmergencyCounter = 0
 $Global:UserChoices = @{}
 $Global:OfflineMode = $false
 
-function Load-ConfigFile { param([string]$Path) if (-not (Test-Path $Path)) { return $null }; $cfg = @{}; Get-Content $Path | ForEach-Object { if ($_ -match '^\s*([^#:=]+)\s*[:=]\s*(.+)$') { $cfg[$matches[1].Trim()] = $matches[2].Trim() } }; return $cfg }
+function Load-ConfigFile {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return $null }
+    $cfg = @{}
+    Get-Content $Path | ForEach-Object {
+        if ($_ -match '^\s*([^#:=]+)\s*[:=]\s*(.+)$') {
+            $cfg[$matches[1].Trim()] = $matches[2].Trim()
+        }
+    }
+    return $cfg
+}
+
 $AesKey = [byte[]](0x4D,0x79,0x53,0x75,0x70,0x65,0x72,0x53,0x65,0x63,0x72,0x65,0x74,0x50,0x72,0x6F,0x6A,0x65,0x63,0x74,0x4B,0x65,0x79,0x5F,0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38)
-function Decrypt-String { param([string]$StringToDecrypt) try { if ([string]::IsNullOrEmpty($StringToDecrypt)) { return "" }; $bytes = [Convert]::FromBase64String($StringToDecrypt); if ($bytes.Length -lt 17) { return "" }; $aes = New-Object System.Security.Cryptography.AesManaged; $aes.Key = $AesKey; $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC; $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7; $aes.IV = $bytes[0..15]; $decryptor = $aes.CreateDecryptor(); $decryptedBytes = $decryptor.TransformFinalBlock($bytes,16,$bytes.Length-16); return [System.Text.Encoding]::UTF8.GetString($decryptedBytes) } catch { return "" } }
-function Load-WpfWindow { param([string]$xaml) try { $sr = New-Object System.IO.StringReader($xaml); $xr = [System.Xml.XmlReader]::Create($sr); return [System.Windows.Markup.XamlReader]::Load($xr) } catch { [System.Windows.MessageBox]::Show("Fatal GUI load error: $($_.Exception.Message)", "Fatal Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error); exit } }
-function Initialize-Resources { $resources = @{ Success = $false; Disks = @(); WindowsVersions = @(); ErrorMessage = "" }; try { "automount enable`nrescan" | diskpart | Out-Null; Start-Sleep -Seconds 2; $disks = Get-Disk | Where-Object { $_.IsSystem -eq $false } | ForEach-Object { "Disk $($_.Number) - $($_.FriendlyName) ($([math]::Round($_.Size/1GB,2)) GB)" }; if ($disks.Count -eq 0) { $disks = Get-Disk | ForEach-Object { "Disk $($_.Number) - $($_.FriendlyName) ($([math]::Round($_.Size/1GB,2)) GB)" } }; $resources.Disks = $disks; $windowsDir = Join-Path $PSScriptRoot "windows"; if (Test-Path $windowsDir) { $resources.WindowsVersions = Get-ChildItem $windowsDir -Directory | ForEach-Object { $_.Name } }; if ($resources.Disks.Count -eq 0) { $resources.ErrorMessage = "No disks found." } elseif ($resources.WindowsVersions.Count -eq 0) { $resources.ErrorMessage = "No Windows versions found." } else { $resources.Success = $true } } catch { $resources.ErrorMessage = $_.Exception.Message }; return $resources }
-function Get-RemoteString { param([string]$url, [int]$timeout=20) Write-Host "URL: $url" -ForegroundColor Green; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }; try { $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec $timeout -ErrorAction Stop; Write-Host "Fetched: $($r.Content.Trim())" -ForegroundColor Green; return $r.Content.Trim() } catch { try { $wc = New-Object System.Net.WebClient; $wc.Headers["User-Agent"] = "Mozilla/5.0"; $s = $wc.DownloadString($url); Write-Host "Fetched WC: $s" -ForegroundColor Green; return $s.Trim() } catch { Write-Host "Fetch failed: $($_.Exception.Message)" -ForegroundColor Red; return $null } } }
 
-function Show-LoginWindow { $xaml = @'<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Login" Height="250" Width="400" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Background="#2E3338"><Grid Margin="20"><TextBlock Text="Enter Password" Foreground="White" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,10"/><PasswordBox x:Name="PasswordBox" Height="40" Margin="50,50,50,0" Background="#3C424A" Foreground="White" BorderBrush="#545D6A"/><TextBlock x:Name="StatusText" Foreground="#FF6347" HorizontalAlignment="Center" Margin="0,10,0,0" TextWrapping="Wrap"/><Button x:Name="LoginButton" Content="Continue" Height="40" Margin="0,0,0,20" VerticalAlignment="Bottom" Background="#007ACC" Foreground="White"/></Grid></Window>'; $win = Load-WpfWindow $xaml; $pb = $win.FindName("PasswordBox"); $btn = $win.FindName("LoginButton"); $st = $win.FindName("StatusText"); if (-not (Test-Path $ConfigFilePath)) { [System.Windows.MessageBox]::Show("Config not found."); return "Exit" }; $cfg = Load-ConfigFile $ConfigFilePath; if (-not $cfg) { [System.Windows.MessageBox]::Show("Invalid config."); return "Exit" }; $btn.add_Click({ $entered = $pb.Password; $adminPass = Decrypt-String $cfg.SuperAdminPass; if ($entered -eq $adminPass) { $win.Tag = "SuperAdmin"; $win.Close(); return }; if ([string]::IsNullOrEmpty($entered)) { $Global:EmergencyCounter++; $st.Text = "Attempt $($Global:EmergencyCounter)/5"; if ($Global:EmergencyCounter -ge 5) { $webhook = Decrypt-String $cfg.WebhookUrl; if ($webhook) { Invoke-WebRequest -Uri $webhook -Method Post -Body "RECOVERY: $adminPass" -ErrorAction SilentlyContinue }; $win.Tag = "Exit"; $win.Close() }; return }; $st.Text = "Verifying..."; $url = Decrypt-String $cfg.DriveUrl; $remote = Get-RemoteString $url; $decryptedRemote = if ($remote) { Decrypt-String $remote } else { "" }; Write-Host "Entered: $entered | Decrypted: $decryptedRemote" -ForegroundColor Green; if ($entered -eq $decryptedRemote) { $win.Tag = "User"; $win.Close() } else { $st.Text = "Incorrect password." } }); $win.ShowDialog() | Out-Null; return $win.Tag }
-function Show-AdminDashboard { $xaml = @'<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Admin" Height="300" Width="400" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Background="#2E3338"><Grid Margin="20"><TextBlock Text="Admin Options" Foreground="White" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,10"/><Button x:Name="OfflineButton" Content="Offline Mode" Height="50" Margin="50,50,50,20" Background="#FF8C00" Foreground="White" VerticalAlignment="Bottom"/><Button x:Name="ReconfigureButton" Content="Config Tool" Height="50" Margin="50,0,50,20" Background="#17A2B8" Foreground="White" VerticalAlignment="Bottom"/></Grid></Window>'; $win = Load-WpfWindow $xaml; $ob = $win.FindName("OfflineButton"); $rb = $win.FindName("ReconfigureButton"); $ob.add_Click({ $Global:OfflineMode = $true; $win.Tag = "Continue"; $win.Close() }); $rb.add_Click({ $cfgPath = Join-Path $PSScriptRoot "createconfig.ps1"; if (Test-Path $cfgPath) { Start-Process powershell -ArgumentList "-NoExit -ExecutionPolicy Bypass -File `"$cfgPath`"" -WindowStyle Normal }; $win.Tag = "Exit"; $win.Close() }); $win.ShowDialog() | Out-Null; return $win.Tag }
-function Show-MainInstallWindows { $xaml = @'<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Setup" Height="650" Width="500" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Background="#2E3338"><Grid Margin="20"><GroupBox Header="System Setup" Foreground="White"><StackPanel Margin="10"><TextBlock Text="Windows Version" Foreground="#CCCCCC" Margin="0,0,0,5"/><ComboBox x:Name="WindowsVersionCombo" Height="30" Margin="0,0,0,10"/><TextBlock Text="Target Disk" Foreground="#CCCCCC" Margin="0,0,0,5"/><ComboBox x:Name="DiskCombo" Height="30" Margin="0,0,0,10"/><StackPanel Orientation="Horizontal"><RadioButton x:Name="FormatAllRadio" Content="Format All" IsChecked="True" Foreground="White"/><RadioButton x:Name="FormatCRadio" Content="C Only" Foreground="White"/></StackPanel></StackPanel></GroupBox><GroupBox Header="App Setup" Foreground="White" Margin="0,10,0,0"><StackPanel Margin="10"><CheckBox x:Name="EnableAppCheck" Content="Enable Apps" IsChecked="False" Foreground="White"/><StackPanel Orientation="Horizontal" Margin="0,10,0,0"><RadioButton x:Name="Morabaa7Radio" Content="Morabaa7" GroupName="AppPackage" IsEnabled="False" Foreground="White"/><RadioButton x:Name="RestaurantRadio" Content="Restaurant" GroupName="AppPackage" IsEnabled="False" Foreground="White"/><RadioButton x:Name="Sql19Radio" Content="SQL19" GroupName="AppPackage" IsChecked="True" IsEnabled="False" Foreground="White"/></StackPanel><StackPanel x:Name="SubOptionsPanel" Orientation="Horizontal" Visibility="Collapsed" Margin="0,10,0,0"><RadioButton x:Name="MainRadio" Content="Main" GroupName="SubOption" IsChecked="True" Foreground="White"/><RadioButton x:Name="SubRadio" Content="Sub" GroupName="SubOption" Foreground="White"/></StackPanel><StackPanel x:Name="SqlInstancePanel" Orientation="Vertical" Visibility="Collapsed" Margin="10,10,10,0"><TextBlock Text="SQL Instance:" Foreground="#CCCCCC"/><TextBox x:Name="SqlInstanceText" Height="30"/></StackPanel></StackPanel></GroupBox><TextBlock x:Name="ValidationText" Foreground="#FF6347" HorizontalAlignment="Center" Margin="0,10,0,0" TextWrapping="Wrap"/><Button x:Name="DeployButton" Content="Deploy" Height="50" Margin="0,20,0,0" Background="#28A745" Foreground="White"/></Grid></Window>'; $win = Load-WpfWindow $xaml; $c = @{}; @("WindowsVersionCombo","DiskCombo","FormatAllRadio","FormatCRadio","EnableAppCheck","Morabaa7Radio","RestaurantRadio","Sql19Radio","SubOptionsPanel","MainRadio","SubRadio","DeployButton","ValidationText","SqlInstancePanel","SqlInstanceText") | ForEach-Object { $c[$_] = $win.FindName($_) }; $init = Initialize-Resources; if (-not $init.Success) { $c.ValidationText.Text = $init.ErrorMessage; $c.DeployButton.IsEnabled = $false } else { $init.WindowsVersions | ForEach-Object { $c.WindowsVersionCombo.Items.Add($_) }; $init.Disks | ForEach-Object { $c.DiskCombo.Items.Add($_) }; $c.WindowsVersionCombo.SelectedIndex = 0; $c.DiskCombo.SelectedIndex = 0 }; $handler = { if (-not $c.EnableAppCheck.IsChecked) { $c.Morabaa7Radio.IsEnabled = $false; $c.RestaurantRadio.IsEnabled = $false; $c.Sql19Radio.IsEnabled = $false; $c.SubOptionsPanel.Visibility = "Collapsed"; $c.SqlInstancePanel.Visibility = "Collapsed"; return }; $c.Morabaa7Radio.IsEnabled = $true; $c.RestaurantRadio.IsEnabled = $true; $c.Sql19Radio.IsEnabled = $true; $c.SubOptionsPanel.Visibility = if ($c.Morabaa7Radio.IsChecked -or $c.RestaurantRadio.IsChecked) { "Visible" } else { "Collapsed" }; $c.SqlInstancePanel.Visibility = if ($c.Sql19Radio.IsChecked) { "Visible" } else { "Collapsed" } }; $c.EnableAppCheck.add_Checked($handler); $c.EnableAppCheck.add_Unchecked($handler); $c.Morabaa7Radio.add_Checked($handler); $c.RestaurantRadio.add_Checked($handler); $c.Sql19Radio.add_Checked($handler); $handler.Invoke(); $c.DeployButton.add_Click({ if (-not $c.WindowsVersionCombo.SelectedItem -or -not $c.DiskCombo.SelectedItem) { $c.ValidationText.Text = "Select version and disk."; return }; if ($c.EnableAppCheck.IsChecked -and -not ($c.Morabaa7Radio.IsChecked -or $c.RestaurantRadio.IsChecked -or $c.Sql19Radio.IsChecked)) { $c.ValidationText.Text = "Select package."; return }; $confirm = [System.Windows.MessageBox]::Show("Confirm format and install?"); if ($confirm -ne "Yes") { return }; $Global:UserChoices = @{ WindowsVersionFolder = $c.WindowsVersionCombo.SelectedItem; TargetDiskNumber = ($c.DiskCombo.SelectedItem -split ' ')[1]; FormatOption = if ($c.FormatAllRadio.IsChecked) { "All" } else { "C" }; AppEnabled = $c.EnableAppCheck.IsChecked; SoftwarePackage = if ($c.Morabaa7Radio.IsChecked) { "Morabaa7" } elseif ($c.RestaurantRadio.IsChecked) { "Restaurant" } else { "SQL19" }; SubOption = if ($c.MainRadio.IsChecked) { "Main" } else { "Sub" }; SqlInstanceName = $c.SqlInstanceText.Text }; $win.Close() }); $win.ShowDialog() | Out-Null; return $Global:UserChoices.Count -gt 0 }
-function Start-Deployment { $xaml = @'<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Progress" Height="200" Width="500" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Background="#2E3338"><Grid Margin="20"><TextBlock x:Name="StatusLabel" Text="Starting" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,10"/><ProgressBar x:Name="ProgressBar" Height="30" Margin="0,20,0,0"/><TextBlock x:Name="StepLabel" Text="" Foreground="#CCCCCC" HorizontalAlignment="Center" Margin="0,10,0,0"/><Button x:Name="CloseButton" Content="Close" Height="30" Margin="0,0,0,10" Visibility="Collapsed" Background="#FF6347" Foreground="White" VerticalAlignment="Bottom"/></Grid></Window>'; $pw = Load-WpfWindow $xaml; $sl = $pw.FindName("StatusLabel"); $pb = $pw.FindName("ProgressBar"); $stl = $pw.FindName("StepLabel"); $cb = $pw.FindName("CloseButton"); $cb.add_Click({ $pw.Close() }); $sync = [hashtable]::Synchronized(@{ Percent=0; Status=""; Step="" }); function Update-Progress { param($p,$s,$st) $sync.Percent = $p; $sync.Status = $s; $sync.Step = $st }; try { $choices = $Global:UserChoices; $isUEFI = $false; try { if ((Get-WmiObject Win32_ComputerSystem).PCSystemType -eq 2) { $isUEFI = $true } } catch { $isUEFI = $false }; Update-Progress 25 "Partitioning..." "Step 1/4"; $diskSizeGB = (Get-Disk $choices.TargetDiskNumber).Size / 1GB; $winSizeMB = [math]::Round(($diskSizeGB / 3) * 1024); $dpScript = Join-Path $env:TEMP "dp.txt"; if ($choices.FormatOption -eq "All") { if ($isUEFI) { @("select disk $($choices.TargetDiskNumber)","clean","convert gpt","create partition efi size=100","format quick fs=fat32 label=System","assign letter=S","create partition msr size=16","create partition primary size=$winSizeMB","format quick fs=ntfs label=Windows","assign letter=C","create partition primary","format quick fs=ntfs label=Data","assign letter=D","exit") } else { @("select disk $($choices.TargetDiskNumber)","clean","convert mbr","create partition primary size=$winSizeMB","format quick fs=ntfs label=Windows","assign letter=C","active","create partition primary","format quick fs=ntfs label=Data","assign letter=D","exit") } } else { # Only C logic... }; $dpScript | Out-File $dpScript -Encoding ASCII; diskpart /s $dpScript; Remove-Item $dpScript; Update-Progress 50 "Applying image..." "Step 2/4"; $wimPath = Join-Path $PSScriptRoot "windows\$($choices.WindowsVersionFolder)\sources\install.wim"; if (-not (Test-Path $wimPath)) { throw "WIM not found" }; $tempWim = Join-Path $env:TEMP "temp.wim"; Copy-Item $wimPath $tempWim; $wimlib = Join-Path $PSScriptRoot "tools\wimlib-imagex.exe"; if (Test-Path $wimlib) { & $wimlib apply $tempWim 1 C:\; if ($LASTEXITCODE -ne 0) { throw "wimlib failed" } } else { dism /Apply-Image /ImageFile:$tempWim /Index:1 /ApplyDir:C:\; if ($LASTEXITCODE -ne 0) { throw "DISM failed" } }; Remove-Item $tempWim; Update-Progress 75 "Boot config..." "Step 3/4"; if ($isUEFI) { bcdboot C:\Windows /s S: /f UEFI } else { bcdboot C:\Windows /s C: /f BIOS }; if ($LASTEXITCODE -ne 0) { throw "bcdboot failed" }; Update-Progress 100 "Complete" "Done" } catch { $sync.Status = $_.Exception.Message; $sync.Percent = 100; $sync.Step = "Failed" }; while ($true) { $sl.Text = $sync.Status; $pb.Value = $sync.Percent; $stl.Text = $sync.Step; [System.Windows.Forms.Application]::DoEvents(); Start-Sleep 200; if ($sync.Percent -eq 100) { break } }; $cb.Visibility = "Visible"; $pw.ShowDialog() | Out-Null }
+function Decrypt-String {
+    param([string]$StringToDecrypt)
+    try {
+        if ([string]::IsNullOrEmpty($StringToDecrypt)) { return "" }
+        $bytes = [Convert]::FromBase64String($StringToDecrypt)
+        if ($bytes.Length -lt 17) { return "" }
+        $aes = New-Object System.Security.Cryptography.AesManaged
+        $aes.Key = $AesKey
+        $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC
+        $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
+        $aes.IV = $bytes[0..15]
+        $decryptor = $aes.CreateDecryptor()
+        $decryptedBytes = $decryptor.TransformFinalBlock($bytes,16,$bytes.Length-16)
+        return [System.Text.Encoding]::UTF8.GetString($decryptedBytes)
+    } catch { return "" }
+}
 
-$login = Show-LoginWindow; if ($login -eq "Exit") { exit }; if ($login -eq "SuperAdmin") { $admin = Show-AdminDashboard; if ($admin -eq "Exit") { exit } }; if (Show-MainInstallWindows) { Start-Deployment }
+function Load-WpfWindow {
+    param([string]$xaml)
+    try {
+        $sr = New-Object System.IO.StringReader($xaml)
+        $xr = [System.Xml.XmlReader]::Create($sr)
+        return [System.Windows.Markup.XamlReader]::Load($xr)
+    } catch {
+        [System.Windows.MessageBox]::Show("Fatal GUI load error: $($_.Exception.Message)", "Fatal Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+        exit
+    }
+}
+
+function Initialize-Resources {
+    $resources = @{ Success = $false; Disks = @(); WindowsVersions = @(); ErrorMessage = "" }
+    try {
+        "automount enable`nrescan" | diskpart | Out-Null
+        Start-Sleep -Seconds 2
+        $disks = Get-Disk | Where-Object { $_.IsSystem -eq $false } | ForEach-Object { "Disk $($_.Number) - $($_.FriendlyName) ($([math]::Round($_.Size/1GB,2)) GB)" }
+        if ($disks.Count -eq 0) { $disks = Get-Disk | ForEach-Object { "Disk $($_.Number) - $($_.FriendlyName) ($([math]::Round($_.Size/1GB,2)) GB)" } }
+        $resources.Disks = $disks
+        $windowsDir = Join-Path $PSScriptRoot "windows"
+        if (Test-Path $windowsDir) { $resources.WindowsVersions = Get-ChildItem $windowsDir -Directory | ForEach-Object { $_.Name } }
+        if ($resources.Disks.Count -eq 0) { $resources.ErrorMessage = "No disks found." }
+        elseif ($resources.WindowsVersions.Count -eq 0) { $resources.ErrorMessage = "No Windows versions found." }
+        else { $resources.Success = $true }
+    } catch { $resources.ErrorMessage = $_.Exception.Message }
+    return $resources
+}
+
+function Get-RemoteString {
+    param([string]$url, [int]$timeout=20)
+    Write-Host "URL: $url" -ForegroundColor Green
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+    try {
+        $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec $timeout -ErrorAction Stop
+        Write-Host "Fetched: $($r.Content.Trim())" -ForegroundColor Green
+        return $r.Content.Trim()
+    } catch {
+        try {
+            $wc = New-Object System.Net.WebClient
+            $wc.Headers["User-Agent"] = "Mozilla/5.0"
+            $s = $wc.DownloadString($url)
+            Write-Host "Fetched WC: $s" -ForegroundColor Green
+            return $s.Trim()
+        } catch {
+            Write-Host "Fetch failed: $($_.Exception.Message)" -ForegroundColor Red
+            return $null
+        }
+    }
+}
+
+function Show-LoginWindow {
+    $xaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Login" Height="250" Width="400" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Background="#2E3338">
+    <Grid Margin="20">
+        <TextBlock Text="Enter Password" Foreground="White" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,10"/>
+        <PasswordBox x:Name="PasswordBox" Height="40" Margin="50,50,50,0" Background="#3C424A" Foreground="White" BorderBrush="#545D6A"/>
+        <TextBlock x:Name="StatusText" Foreground="#FF6347" HorizontalAlignment="Center" Margin="0,10,0,0" TextWrapping="Wrap"/>
+        <Button x:Name="LoginButton" Content="Continue" Height="40" Margin="0,0,0,20" VerticalAlignment="Bottom" Background="#007ACC" Foreground="White"/>
+    </Grid>
+</Window>
+'@
+    $win = Load-WpfWindow $xaml
+    $pb = $win.FindName("PasswordBox")
+    $btn = $win.FindName("LoginButton")
+    $st = $win.FindName("StatusText")
+    if (-not (Test-Path $ConfigFilePath)) { [System.Windows.MessageBox]::Show("Config not found."); return "Exit" }
+    $cfg = Load-ConfigFile $ConfigFilePath
+    if (-not $cfg) { [System.Windows.MessageBox]::Show("Invalid config."); return "Exit" }
+    $btn.add_Click({
+        $entered = $pb.Password
+        $adminPass = Decrypt-String $cfg.SuperAdminPass
+        if ($entered -eq $adminPass) { $win.Tag = "SuperAdmin"; $win.Close(); return }
+        if ([string]::IsNullOrEmpty($entered)) {
+            $Global:EmergencyCounter++
+            $st.Text = "Attempt $($Global:EmergencyCounter)/5"
+            if ($Global:EmergencyCounter -ge 5) {
+                $webhook = Decrypt-String $cfg.WebhookUrl
+                if ($webhook) { Invoke-WebRequest -Uri $webhook -Method Post -Body "RECOVERY: $adminPass" -ErrorAction SilentlyContinue }
+                $win.Tag = "Exit"; $win.Close()
+            }
+            return
+        }
+        $st.Text = "Verifying..."
+        $url = Decrypt-String $cfg.DriveUrl
+        $remote = Get-RemoteString $url
+        $decryptedRemote = if ($remote) { Decrypt-String $remote } else { "" }
+        Write-Host "Entered: $entered | Decrypted: $decryptedRemote" -ForegroundColor Green
+        if ($entered -eq $decryptedRemote) { $win.Tag = "User"; $win.Close() } else { $st.Text = "Incorrect password." }
+    })
+    $win.ShowDialog() | Out-Null
+    return $win.Tag
+}
+
+function Show-AdminDashboard {
+    $xaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Admin" Height="300" Width="400" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Background="#2E3338">
+    <Grid Margin="20">
+        <TextBlock Text="Admin Options" Foreground="White" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,10"/>
+        <Button x:Name="OfflineButton" Content="Offline Mode" Height="50" Margin="50,50,50,20" Background="#FF8C00" Foreground="White" VerticalAlignment="Bottom"/>
+        <Button x:Name="ReconfigureButton" Content="Config Tool" Height="50" Margin="50,0,50,20" Background="#17A2B8" Foreground="White" VerticalAlignment="Bottom"/>
+    </Grid>
+</Window>
+'@
+    $win = Load-WpfWindow $xaml
+    $ob = $win.FindName("OfflineButton")
+    $rb = $win.FindName("ReconfigureButton")
+    $ob.add_Click({ $Global:OfflineMode = $true; $win.Tag = "Continue"; $win.Close() })
+    $rb.add_Click({
+        $cfgPath = Join-Path $PSScriptRoot "createconfig.ps1"
+        if (Test-Path $cfgPath) { Start-Process powershell -ArgumentList "-NoExit -ExecutionPolicy Bypass -File `"$cfgPath`"" -WindowStyle Normal }
+        $win.Tag = "Exit"; $win.Close()
+    })
+    $win.ShowDialog() | Out-Null
+    return $win.Tag
+}
+
+function Show-MainInstallWindows {
+    $xaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Setup" Height="650" Width="500" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Background="#2E3338">
+    <Grid Margin="20">
+        <GroupBox Header="System Setup" Foreground="White">
+            <StackPanel Margin="10">
+                <TextBlock Text="Windows Version" Foreground="#CCCCCC" Margin="0,0,0,5"/>
+                <ComboBox x:Name="WindowsVersionCombo" Height="30" Margin="0,0,0,10"/>
+                <TextBlock Text="Target Disk" Foreground="#CCCCCC" Margin="0,0,0,5"/>
+                <ComboBox x:Name="DiskCombo" Height="30" Margin="0,0,0,10"/>
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="FormatAllRadio" Content="Format All" IsChecked="True" Foreground="White"/>
+                    <RadioButton x:Name="FormatCRadio" Content="C Only" Foreground="White"/>
+                </StackPanel>
+            </StackPanel>
+        </GroupBox>
+        <GroupBox Header="App Setup" Foreground="White" Margin="0,10,0,0">
+            <StackPanel Margin="10">
+                <CheckBox x:Name="EnableAppCheck" Content="Enable Apps" IsChecked="False" Foreground="White"/>
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <RadioButton x:Name="Morabaa7Radio" Content="Morabaa7" GroupName="AppPackage" IsEnabled="False" Foreground="White"/>
+                    <RadioButton x:Name="RestaurantRadio" Content="Restaurant" GroupName="AppPackage" IsEnabled="False" Foreground="White"/>
+                    <RadioButton x:Name="Sql19Radio" Content="SQL19" GroupName="AppPackage" IsChecked="True" IsEnabled="False" Foreground="White"/>
+                </StackPanel>
+                <StackPanel x:Name="SubOptionsPanel" Orientation="Horizontal" Visibility="Collapsed" Margin="0,10,0,0">
+                    <RadioButton x:Name="MainRadio" Content="Main" GroupName="SubOption" IsChecked="True" Foreground="White"/>
+                    <RadioButton x:Name="SubRadio" Content="Sub" GroupName="SubOption" Foreground="White"/>
+                </StackPanel>
+                <StackPanel x:Name="SqlInstancePanel" Orientation="Vertical" Visibility="Collapsed" Margin="10,10,10,0">
+                    <TextBlock Text="SQL Instance:" Foreground="#CCCCCC"/>
+                    <TextBox x:Name="SqlInstanceText" Height="30"/>
+                </StackPanel>
+            </StackPanel>
+        </GroupBox>
+        <TextBlock x:Name="ValidationText" Foreground="#FF6347" HorizontalAlignment="Center" Margin="0,10,0,0" TextWrapping="Wrap"/>
+        <Button x:Name="DeployButton" Content="Deploy" Height="50" Margin="0,20,0,0" Background="#28A745" Foreground="White"/>
+    </Grid>
+</Window>
+'@
+    $win = Load-WpfWindow $xaml
+    $c = @{}
+    @("WindowsVersionCombo","DiskCombo","FormatAllRadio","FormatCRadio","EnableAppCheck","Morabaa7Radio","RestaurantRadio","Sql19Radio","SubOptionsPanel","MainRadio","SubRadio","DeployButton","ValidationText","SqlInstancePanel","SqlInstanceText") | ForEach-Object { $c[$_] = $win.FindName($_) }
+    $init = Initialize-Resources
+    if (-not $init.Success) {
+        $c.ValidationText.Text = $init.ErrorMessage
+        $c.DeployButton.IsEnabled = $false
+    } else {
+        $init.WindowsVersions | ForEach-Object { $c.WindowsVersionCombo.Items.Add($_) }
+        $init.Disks | ForEach-Object { $c.DiskCombo.Items.Add($_) }
+        $c.WindowsVersionCombo.SelectedIndex = 0
+        $c.DiskCombo.SelectedIndex = 0
+    }
+    $handler = {
+        if (-not $c.EnableAppCheck.IsChecked) {
+            $c.Morabaa7Radio.IsEnabled = $false
+            $c.RestaurantRadio.IsEnabled = $false
+            $c.Sql19Radio.IsEnabled = $false
+            $c.SubOptionsPanel.Visibility = "Collapsed"
+            $c.SqlInstancePanel.Visibility = "Collapsed"
+            return
+        }
+        $c.Morabaa7Radio.IsEnabled = $true
+        $c.RestaurantRadio.IsEnabled = $true
+        $c.Sql19Radio.IsEnabled = $true
+        $c.SubOptionsPanel.Visibility = if ($c.Morabaa7Radio.IsChecked -or $c.RestaurantRadio.IsChecked) { "Visible" } else { "Collapsed" }
+        $c.SqlInstancePanel.Visibility = if ($c.Sql19Radio.IsChecked) { "Visible" } else { "Collapsed" }
+    }
+    $c.EnableAppCheck.add_Checked($handler)
+    $c.EnableAppCheck.add_Unchecked($handler)
+    $c.Morabaa7Radio.add_Checked($handler)
+    $c.RestaurantRadio.add_Checked($handler)
+    $c.Sql19Radio.add_Checked($handler)
+    $handler.Invoke()
+    $c.DeployButton.add_Click({
+        if (-not $c.WindowsVersionCombo.SelectedItem -or -not $c.DiskCombo.SelectedItem) { $c.ValidationText.Text = "Select version and disk."; return }
+        if ($c.EnableAppCheck.IsChecked -and -not ($c.Morabaa7Radio.IsChecked -or $c.RestaurantRadio.IsChecked -or $c.Sql19Radio.IsChecked)) { $c.ValidationText.Text = "Select package."; return }
+        $confirm = [System.Windows.MessageBox]::Show("Confirm format and install?")
+        if ($confirm -ne "Yes") { return }
+        $Global:UserChoices = @{
+            WindowsVersionFolder = $c.WindowsVersionCombo.SelectedItem
+            TargetDiskNumber = ($c.DiskCombo.SelectedItem -split ' ')[1]
+            FormatOption = if ($c.FormatAllRadio.IsChecked) { "All" } else { "C" }
+            AppEnabled = $c.EnableAppCheck.IsChecked
+            SoftwarePackage = if ($c.Morabaa7Radio.IsChecked) { "Morabaa7" } elseif ($c.RestaurantRadio.IsChecked) { "Restaurant" } else { "SQL19" }
+            SubOption = if ($c.MainRadio.IsChecked) { "Main" } else { "Sub" }
+            SqlInstanceName = $c.SqlInstanceText.Text
+        }
+        $win.Close()
+    })
+    $win.ShowDialog() | Out-Null
+    return $Global:UserChoices.Count -gt 0
+}
+
+function Start-Deployment {
+    $xaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Progress" Height="200" Width="500" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Background="#2E3338">
+    <Grid Margin="20">
+        <TextBlock x:Name="StatusLabel" Text="Starting" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,10"/>
+        <ProgressBar x:Name="ProgressBar" Height="30" Margin="0,20,0,0"/>
+        <TextBlock x:Name="StepLabel" Text="" Foreground="#CCCCCC" HorizontalAlignment="Center" Margin="0,10,0,0"/>
+        <Button x:Name="CloseButton" Content="Close" Height="30" Margin="0,0,0,10" Visibility="Collapsed" Background="#FF6347" Foreground="White" VerticalAlignment="Bottom"/>
+    </Grid>
+</Window>
+'@
+    $pw = Load-WpfWindow $xaml
+    $sl = $pw.FindName("StatusLabel")
+    $pb = $pw.FindName("ProgressBar")
+    $stl = $pw.FindName("StepLabel")
+    $cb = $pw.FindName("CloseButton")
+    $cb.add_Click({ $pw.Close() })
+    $sync = [hashtable]::Synchronized(@{ Percent=0; Status=""; Step="" })
+    function Update-Progress { param($p,$s,$st) $sync.Percent = $p; $sync.Status = $s; $sync.Step = $st }
+    try {
+        $choices = $Global:UserChoices
+        $isUEFI = $false
+        try { if ((Get-WmiObject Win32_ComputerSystem).PCSystemType -eq 2) { $isUEFI = $true } } catch { $isUEFI = $false }
+        Update-Progress 25 "Partitioning..." "Step 1/4"
+        $diskSizeGB = (Get-Disk $choices.TargetDiskNumber).Size / 1GB
+        $winSizeMB = [math]::Round(($diskSizeGB / 3) * 1024)
+        $dpScript = Join-Path $env:TEMP "dp.txt"
+        if ($choices.FormatOption -eq "All") {
+            if ($isUEFI) {
+                @("select disk $($choices.TargetDiskNumber)","clean","convert gpt","create partition efi size=100","format quick fs=fat32 label=System","assign letter=S","create partition msr size=16","create partition primary size=$winSizeMB","format quick fs=ntfs label=Windows","assign letter=C","create partition primary","format quick fs=ntfs label=Data","assign letter=D","exit") | Out-File $dpScript -Encoding ASCII
+            } else {
+                @("select disk $($choices.TargetDiskNumber)","clean","convert mbr","create partition primary size=$winSizeMB","format quick fs=ntfs label=Windows","assign letter=C","active","create partition primary","format quick fs=ntfs label=Data","assign letter=D","exit") | Out-File $dpScript -Encoding ASCII
+            }
+        } else {
+            # Only C logic omitted for brevity
+            @("select disk $($choices.TargetDiskNumber)","select partition 1","format quick fs=ntfs label=Windows","assign letter=C","exit") | Out-File $dpScript -Encoding ASCII
+        }
+        diskpart /s $dpScript
+        Remove-Item $dpScript
+        Update-Progress 50 "Applying image..." "Step 2/4"
+        $wimPath = Join-Path $PSScriptRoot "windows\$($choices.WindowsVersionFolder)\sources\install.wim"
+        if (-not (Test-Path $wimPath)) { throw "WIM not found" }
+        $tempWim = Join-Path $env:TEMP "temp.wim"
+        Copy-Item $wimPath $tempWim
+        $wimlib = Join-Path $PSScriptRoot "tools\wimlib-imagex.exe"
+        if (Test-Path $wimlib) {
+            & $wimlib apply $tempWim 1 C:\
+            if ($LASTEXITCODE -ne 0) { throw "wimlib failed" }
+        } else {
+            dism /Apply-Image /ImageFile:$tempWim /Index:1 /ApplyDir:C:\
+            if ($LASTEXITCODE -ne 0) { throw "DISM failed" }
+        }
+        Remove-Item $tempWim
+        Update-Progress 75 "Boot config..." "Step 3/4"
+        if ($isUEFI) {
+            bcdboot C:\Windows /s S: /f UEFI
+        } else {
+            bcdboot C:\Windows /s C: /f BIOS
+        }
+        if ($LASTEXITCODE -ne 0) { throw "bcdboot failed" }
+        Update-Progress 100 "Complete" "Done"
+    } catch {
+        $sync.Status = $_.Exception.Message
+        $sync.Percent = 100
+        $sync.Step = "Failed"
+    }
+    while ($true) {
+        $sl.Text = $sync.Status
+        $pb.Value = $sync.Percent
+        $stl.Text = $sync.Step
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-Sleep 200
+        if ($sync.Percent -eq 100) { break }
+    }
+    $cb.Visibility = "Visible"
+    $pw.ShowDialog() | Out-Null
+}
+
+$login = Show-LoginWindow
+if ($login -eq "Exit") { exit }
+if ($login -eq "SuperAdmin") {
+    $admin = Show-AdminDashboard
+    if ($admin -eq "Exit") { exit }
+}
+if (Show-MainInstallWindows) { Start-Deployment }
