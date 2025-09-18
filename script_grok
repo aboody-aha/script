@@ -1,4 +1,4 @@
-<# Universal Windows Deployment Tool - Fixed for HBCD #>
+<# Universal Windows Deployment Tool - Fixed UI & Deploy #>
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = "Stop"
@@ -163,7 +163,14 @@ function Show-MainInstallWindows {
     $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Setup" Height="650" Width="500" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Background="#2E3338">
     <Grid Margin="20">
-        <GroupBox Header="System Setup" Foreground="White">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <GroupBox Header="System Setup" Foreground="White" Grid.Row="0">
             <StackPanel Margin="10">
                 <TextBlock Text="Windows Version" Foreground="#CCCCCC" Margin="0,0,0,5"/>
                 <ComboBox x:Name="WindowsVersionCombo" Height="30" Margin="0,0,0,10"/>
@@ -175,7 +182,7 @@ function Show-MainInstallWindows {
                 </StackPanel>
             </StackPanel>
         </GroupBox>
-        <GroupBox Header="App Setup" Foreground="White" Margin="0,10,0,0">
+        <GroupBox Header="App Setup" Foreground="White" Grid.Row="1" Margin="0,10,0,0">
             <StackPanel Margin="10">
                 <CheckBox x:Name="EnableAppCheck" Content="Enable Apps" IsChecked="False" Foreground="White"/>
                 <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
@@ -193,8 +200,8 @@ function Show-MainInstallWindows {
                 </StackPanel>
             </StackPanel>
         </GroupBox>
-        <TextBlock x:Name="ValidationText" Foreground="#FF6347" HorizontalAlignment="Center" Margin="0,10,0,0" TextWrapping="Wrap"/>
-        <Button x:Name="DeployButton" Content="Deploy" Height="50" Margin="0,20,0,0" Background="#28A745" Foreground="White"/>
+        <TextBlock x:Name="ValidationText" Foreground="#FF6347" Grid.Row="3" HorizontalAlignment="Center" Margin="0,10,0,0" TextWrapping="Wrap"/>
+        <Button x:Name="DeployButton" Content="Deploy" Grid.Row="4" Height="50" Margin="0,20,0,0" Background="#28A745" Foreground="White"/>
     </Grid>
 </Window>
 '@
@@ -235,8 +242,8 @@ function Show-MainInstallWindows {
     $c.DeployButton.add_Click({
         if (-not $c.WindowsVersionCombo.SelectedItem -or -not $c.DiskCombo.SelectedItem) { $c.ValidationText.Text = "Select version and disk."; return }
         if ($c.EnableAppCheck.IsChecked -and -not ($c.Morabaa7Radio.IsChecked -or $c.RestaurantRadio.IsChecked -or $c.Sql19Radio.IsChecked)) { $c.ValidationText.Text = "Select package."; return }
-        $confirm = [System.Windows.MessageBox]::Show("Confirm format and install?")
-        if ($confirm -ne "Yes") { return }
+        $confirm = [System.Windows.MessageBox]::Show("Confirm format and install?", "Confirm", [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
+        if ($confirm -ne [System.Windows.MessageBoxResult]::Yes) { return }
         $Global:UserChoices = @{
             WindowsVersionFolder = $c.WindowsVersionCombo.SelectedItem
             TargetDiskNumber = ($c.DiskCombo.SelectedItem -split ' ')[1]
@@ -286,7 +293,6 @@ function Start-Deployment {
                 @("select disk $($choices.TargetDiskNumber)","clean","convert mbr","create partition primary size=$winSizeMB","format quick fs=ntfs label=Windows","assign letter=C","active","create partition primary","format quick fs=ntfs label=Data","assign letter=D","exit") | Out-File $dpScript -Encoding ASCII
             }
         } else {
-            # Only C logic omitted for brevity
             @("select disk $($choices.TargetDiskNumber)","select partition 1","format quick fs=ntfs label=Windows","assign letter=C","exit") | Out-File $dpScript -Encoding ASCII
         }
         diskpart /s $dpScript
