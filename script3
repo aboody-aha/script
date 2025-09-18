@@ -1,28 +1,28 @@
 # Universal Windows Deployment Tool - FINAL CORRECTED VERSION (v5.1)
 # ---------------------------------------------------------
-# - ØªÙ… ØªØµØ­ÙŠØ­ Ø¬Ù…ÙŠØ¹ Ø£Ø®Ø·Ø§Ø¡ ParserError Ø§Ù„Ù…ØªØ¹Ù„Ù‚Ø© Ø¨Ø¹Ù„Ø§Ù…Ø§Øª Ø§Ù„Ø§Ù‚ØªØ¨Ø§Ø³.
-# - ØªÙ… Ø¥Ø¬Ø±Ø§Ø¡ Ù…Ø±Ø§Ø¬Ø¹Ø© Ø´Ø§Ù…Ù„Ø© Ù„Ø¶Ù…Ø§Ù† Ø¹Ø¯Ù… ÙˆØ¬ÙˆØ¯ Ø£Ø®Ø·Ø§Ø¡ ØªØ±ÙƒÙŠØ¨ÙŠØ© Ø£Ø®Ø±Ù‰.
-# - ØªÙ… ØªØ¹Ø¯ÙŠÙ„ Ù…Ø³Ø§Ø± Ù…Ù„Ù Ø§Ù„ØªÙƒÙˆÙŠÙ† Ù„ÙŠØ¹Ù…Ù„ Ù…Ø¹ Ù…Ù„Ù BAT
+# - Fixed all ParserError errors related to quotes.
+# - A comprehensive review has been conducted to ensure there are no further syntax errors.
+# - The configuration file path has been modified to work with the BAT file.
 # ---------------------------------------------------------
 
-# 1. Ø¥Ø¹Ø¯Ø§Ø¯ Ø¹Ø§Ù…
+#1. General Setup
 $OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName PresentationFramework, System.Windows.Forms
 
-# Ø§Ø³ØªØ®Ø¯Ø§Ù… Ø§Ù„Ù…Ø³Ø§Ø± Ø§Ù„ØµØ­ÙŠØ­ Ø§Ù„Ù…Ø·Ù„Ù‚ Ø¨Ø¯Ù„Ø§Ù‹ Ù…Ù† Ø§Ù„Ù…Ø³Ø§Ø± Ø§Ù„Ù†Ø³Ø¨ÙŠ
+# Use absolute path instead of relative path
 $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $ConfigFilePath = Join-Path $PSScriptRoot "config.dat"
 $Global:EmergencyCounter = 0
 $Global:UserChoices = @{}
 $Global:OfflineMode = $false
 
-# Ø§Ù„ØªØ­Ù‚Ù‚ Ù…Ù† ÙˆØ¬ÙˆØ¯ Ù…Ù„Ù Ø§Ù„ØªÙƒÙˆÙŠÙ†
+# Check if the configuration file exists
 if (-not (Test-Path $ConfigFilePath)) {
     [System.Windows.MessageBox]::Show("Config file not found at:`n$ConfigFilePath","Error",[System.Windows.MessageBoxButton]::OK,[System.Windows.MessageBoxImage]::Error)
     exit
 }
 
-# 2. Ø§Ù„Ø¯ÙˆØ§Ù„ Ø§Ù„Ù…Ø³Ø§Ø¹Ø¯Ø©
+#2. Utility functions
 function Load-ConfigFile { param([string]$Path)
     $cfg = @{}; if (-not (Test-Path $Path)) { return $null }; Get-Content $Path | ForEach-Object { if ($_ -match '^\s*([^:#=]+)\s*[:=]\s*(.+)$') { $key = $matches[1].Trim(); $val = $matches[2].Trim(); $cfg[$key] = $val } }; return $cfg
 }
@@ -59,7 +59,7 @@ function Initialize-Resources {
     return $resources
 }
 
-# 3. Ø§Ù„Ù†ÙˆØ§ÙØ° (WPF)
+#3. Windows (WPF)
 function Show-LoginWindow {
 
     [string]$xamlString = @'
