@@ -437,45 +437,48 @@ function Start-Deployment {
         $isUEFI = $true
         try { Get-FirmwareType -ErrorAction Stop | Out-Null } catch { $isUEFI = $false }
 
-        Update-ProgressLocal 25 "Partitioning disk..." "Step 1/4: Disk Preparation"
+        Update-Progress 25 "Preparing disk..." "Step 1/4: Disk Partitioning"
 
-        # disk variables
-        $diskNumber = $choices.TargetDiskNumber
-        $diskObj = Get-Disk -Number $diskNumber -ErrorAction Stop
-        $diskSizeGB = [math]::Round($diskObj.Size / 1GB, 2)
-        $winSizeMB = [math]::Floor(($diskSizeGB / 3) * 1024)
-        if ($winSizeMB -lt 10240) { $winSizeMB = 10240 } # ensure minimum 10GB
+# Detect firmware type: 1 = BIOS, 2 = UEFI
+$firmwareType = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control").PEFirmwareType
+$isUEFI = $false
+if ($firmwareType -eq 2) { $isUEFI = $true }
 
-        $tempDiskpart = Join-Path $env:TEMP "diskpart_$([guid]::NewGuid().ToString()).txt"
-        $dp = "select disk $diskNumber`n"
-        if ($choices.FormatOption -eq "All") {
-            $dp += "clean`n"
-            if ($isUEFI) {
-                $dp += "convert gpt`ncreate partition efi size=100`nformat fs=fat32 quick label=System`nassign letter=S`ncreate partition msr size=16`n"
-            } else {
-                $dp += "convert mbr`n"
-            }
-            $dp += "create partition primary size=$winSizeMB`nformat fs=ntfs quick label=Windows`nassign letter=C`n"
-            if (-not $isUEFI) { $dp += "active`n" }
-            $dp += "create partition primary`nformat fs=ntfs quick label=Data`nassign letter=D`n"
-        } else {
-            # Format C only: ensure a partition labeled Windows exists
-            $winVol = Get-Volume -DiskNumber $diskNumber -ErrorAction SilentlyContinue | Where-Object { $_.FileSystemLabel -eq 'Windows' }
-            if (-not $winVol) { throw "When using Format C Only, a 'Windows' label volume must exist on the selected disk." }
-            $volumes = Get-Volume -DiskNumber $diskNumber
-            foreach ($v in $volumes) { if ($v.DriveLetter) { $dp += "select volume $($v.DriveLetter)`nremove`n" } }
-            $dp += "select partition label=Windows`nformat fs=ntfs quick label=Windows`nassign letter=C`n"
-            $dp += "select partition label=Data`nassign letter=D`n"
-            if ($isUEFI) { $dp += "select partition label=System`nassign letter=S`n" }
-        }
+# DiskPart script path
+$diskpartScript = Join-Path $env:TEMP "diskpart_script.txt"
 
-        $dp | Out-File -FilePath $tempDiskpart -Encoding ASCII -Force
-        diskpart /s $tempDiskpart
-        if ($LASTEXITCODE -ne 0) { throw "Diskpart reported errors. Check $tempDiskpart" }
-        Remove-Item $tempDiskpart -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 3
+if ($isUEFI) {
+    # UEFI - GPT layout
+    @"
+select disk 0
+clean
+convert gpt
+create partition efi size=100
+format quick fs=fat32 label="System"
+assign letter=S
+create partition msr size=16
+create partition primary
+format quick fs=ntfs label="Windows"
+assign letter=C
+exit
+"@ | Out-File -Encoding ASCII $diskpartScript
+} else {
+    # Legacy BIOS - MBR layout
+    @"
+select disk 0
+clean
+convert mbr
+create partition primary
+format quick fs=ntfs label="Windows"
+assign letter=C
+active
+exit
+"@ | Out-File -Encoding ASCII $diskpartScript
+}
 
-        Update-ProgressLocal 45 "Partitioning completed." "Step 1/4 complete"
+Start-Process -FilePath diskpart.exe -ArgumentList "/s `"$diskpartScript`"" -Wait -NoNewWindow
+
+Write-Host "Disk prepared successfully."
 
         # Step 2: Apply Image
         Update-ProgressLocal 50 "Applying Windows image..." "Step 2/4: Image Application"
@@ -510,12 +513,24 @@ function Start-Deployment {
         Update-ProgressLocal 90 "Image applied successfully." "Step 2/4 complete"
 
         # Step 3: Boot configuration
-        Update-ProgressLocal 92 "Configuring boot..." "Step 3/4: Boot Configuration"
-        if ($isUEFI) {
-            & bcdboot C:\Windows /s S: /f UEFI
-        } else {
-            & bcdboot C:\Windows /s C: /f BIOS
-        }
+        Update-Progress 75 "Configuring boot files..." "Step 3/4: Boot Configuration"
+
+try {
+    if ($isUEFI) {
+        & bcdboot C:\Windows /s S: /f UEFI
+    } else {
+        & bcdboot C:\Windows /s C: /f BIOS
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "bcdboot failed with exit code $LASTEXITCODE"
+    }
+}
+catch {
+    [System.Windows.MessageBox]::Show("Boot configuration failed:`n$($_.Exception.Message)", "Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+    throw
+}
+
+Write-Host "Boot files configured successfully."
         if ($LASTEXITCODE -ne 0) { throw "bcdboot failed with exit code $LASTEXITCODE" }
 
         Update-ProgressLocal 98 "Finalizing..." "Step 4/4: Finalizing"
